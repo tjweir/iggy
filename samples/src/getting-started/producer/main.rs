@@ -50,7 +50,8 @@ async fn init_system(client: &dyn Client) {
 }
 
 async fn produce_messages(client: &dyn Client) -> Result<(), Box<dyn Error>> {
-    let interval = Duration::from_millis(500);
+    let mut total_sent = 0;
+    let interval = Duration::from_millis(10000);
     info!(
         "Messages will be sent to stream: {}, topic: {}, partition: {} with interval {} ms.",
         STREAM_ID,
@@ -60,7 +61,7 @@ async fn produce_messages(client: &dyn Client) -> Result<(), Box<dyn Error>> {
     );
 
     let mut current_id = 0;
-    let messages_per_batch = 10;
+    let messages_per_batch = 1;
     loop {
         let mut messages = Vec::new();
         for _ in 0..messages_per_batch {
@@ -77,7 +78,9 @@ async fn produce_messages(client: &dyn Client) -> Result<(), Box<dyn Error>> {
                 messages,
             })
             .await?;
-        info!("Sent {messages_per_batch} message(s).");
+
+        total_sent += 1;
+        info!("Sent {messages_per_batch} message(s) total: {total_sent}.");
         sleep(interval).await;
     }
 }

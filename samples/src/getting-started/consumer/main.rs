@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn consume_messages(client: &dyn Client) -> Result<(), Box<dyn Error>> {
-    let interval = Duration::from_millis(500);
+    let interval = Duration::from_millis(100);
     info!(
         "Messages will be consumed from stream: {}, topic: {}, partition: {} with interval {} ms.",
         STREAM_ID,
@@ -42,7 +42,7 @@ async fn consume_messages(client: &dyn Client) -> Result<(), Box<dyn Error>> {
                 partition_id: PARTITION_ID,
                 strategy: PollingStrategy::offset(offset),
                 count: messages_per_batch,
-                auto_commit: false,
+                auto_commit: true,
             })
             .await?;
         if messages.is_empty() {

@@ -13,22 +13,28 @@ use samples::shared::system;
 use std::error::Error;
 use std::sync::Arc;
 use tracing::{info, warn};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     tracing_subscriber::fmt::init();
+
     info!(
         "Advanced consumer has started, selected transport: {}",
         args.transport
     );
+
     let client_provider_config = Arc::new(ClientProviderConfig::from_args(args.to_sdk_args())?);
+
     let client = client_provider::get_client(client_provider_config).await?;
+
     let client = IggyClient::new(
         client,
         IggyClientConfig {
             poll_messages: PollMessagesConfig {
                 interval: args.interval,
+                // what?
                 store_offset_kind: StoreOffsetKind::WhenMessagesAreReceived,
             },
             ..Default::default()
@@ -41,8 +47,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn consume_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dyn Error>> {
+
     info!("Messages will be polled by consumer: {} from stream: {}, topic: {}, partition: {} with interval {} ms.",
         args.consumer_id, args.stream_id, args.topic_id, args.partition_id, args.interval);
+
+    let offset = AtomicU64::new(0);
+
     client
         .start_polling_messages(
             PollMessages {
@@ -53,12 +63,13 @@ async fn consume_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dy
                 stream_id: Identifier::numeric(args.stream_id)?,
                 topic_id: Identifier::numeric(args.topic_id)?,
                 partition_id: args.partition_id,
-                strategy: PollingStrategy::next(),
+                strategy: PollingStrategy::offset(offset.load(Ordering::Relaxed)),
                 count: args.messages_per_batch,
                 auto_commit: true,
             },
-            |message| {
+            move |message| {
                 let result = handle_message(&message);
+                offset.fetch_add(1, Ordering::Relaxed);
                 if let Err(e) = result {
                     warn!("Error handling message: {}", e);
                 }
@@ -72,23 +83,29 @@ async fn consume_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dy
 fn handle_message(message: &Message) -> Result<(), Box<dyn Error>> {
     // The payload can be of any type as it is a raw byte array. In this case it's a JSON string.
     let json = std::str::from_utf8(&message.payload)?;
+
     // The message envelope can be used to send the different types of messages to the same topic.
     let envelope = serde_json::from_str::<Envelope>(json)?;
+
     info!(
         "Handling message type: {} at offset: {}...",
         envelope.message_type, message.offset
     );
+
     match envelope.message_type.as_str() {
         ORDER_CREATED_TYPE => {
-            let order_created = serde_json::from_str::<OrderCreated>(&envelope.payload)?;
+            let order_created: OrderCreated =
+                serde_json::from_str::<OrderCreated>(&envelope.payload)?;
             info!("{:#?}", order_created);
         }
         ORDER_CONFIRMED_TYPE => {
-            let order_confirmed = serde_json::from_str::<OrderConfirmed>(&envelope.payload)?;
+            let order_confirmed: OrderConfirmed =
+                serde_json::from_str::<OrderConfirmed>(&envelope.payload)?;
             info!("{:#?}", order_confirmed);
         }
         ORDER_REJECTED_TYPE => {
-            let order_rejected = serde_json::from_str::<OrderRejected>(&envelope.payload)?;
+            let order_rejected: OrderRejected =
+                serde_json::from_str::<OrderRejected>(&envelope.payload)?;
             info!("{:#?}", order_rejected);
         }
         _ => {
