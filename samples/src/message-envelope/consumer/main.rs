@@ -6,7 +6,7 @@ use iggy::clients::client::{IggyClient, IggyClientConfig, PollMessagesConfig, St
 use iggy::consumer::{Consumer, ConsumerKind};
 use iggy::identifier::Identifier;
 use iggy::messages::poll_messages::{PollMessages, PollingStrategy};
-use iggy::models::message::Message;
+use iggy::models::messages::Message;
 use samples::shared::args::Args;
 use samples::shared::messages::*;
 use samples::shared::system;
@@ -52,7 +52,7 @@ async fn consume_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dy
                 },
                 stream_id: Identifier::numeric(args.stream_id)?,
                 topic_id: Identifier::numeric(args.topic_id)?,
-                partition_id: args.partition_id,
+                partition_id: Some(args.partition_id),
                 strategy: PollingStrategy::next(),
                 count: args.messages_per_batch,
                 auto_commit: true,

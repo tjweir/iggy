@@ -1,13 +1,14 @@
+use crate::models::messages::PolledMessages;
 use crate::polling_consumer::PollingConsumer;
 use crate::topics::topic::Topic;
 use crate::utils::hash;
 use iggy::error::Error;
 use iggy::messages::poll_messages::{PollingKind, PollingStrategy};
 use iggy::messages::send_messages::{Partitioning, PartitioningKind};
-use iggy::models::message::Message;
+use iggy::models::messages::Message;
 use ringbuffer::RingBuffer;
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tracing::trace;
 
 impl Topic {
@@ -17,26 +18,36 @@ impl Topic {
         partition_id: u32,
         strategy: PollingStrategy,
         count: u32,
-    ) -> Result<Vec<Arc<Message>>, Error> {
+    ) -> Result<PolledMessages, Error> {
         if !self.has_partitions() {
-            return Err(Error::NoPartitions(self.id, self.stream_id));
+            return Err(Error::NoPartitions(self.topic_id, self.stream_id));
         }
 
         let partition = self.partitions.get(&partition_id);
         if partition.is_none() {
-            return Err(Error::PartitionNotFound(partition_id));
+            return Err(Error::PartitionNotFound(
+                partition_id,
+                self.stream_id,
+                self.stream_id,
+            ));
         }
 
         let partition = partition.unwrap();
         let partition = partition.read().await;
         let value = strategy.value;
-        match strategy.kind {
+        let messages = match strategy.kind {
             PollingKind::Offset => partition.get_messages_by_offset(value, count).await,
             PollingKind::Timestamp => partition.get_messages_by_timestamp(value, count).await,
             PollingKind::First => partition.get_first_messages(count).await,
             PollingKind::Last => partition.get_last_messages(count).await,
             PollingKind::Next => partition.get_next_messages(consumer, count).await,
-        }
+        }?;
+
+        Ok(PolledMessages {
+            messages,
+            partition_id,
+            current_offset: partition.current_offset,
+        })
     }
 
     pub async fn append_messages(
@@ -45,7 +56,7 @@ impl Topic {
         messages: Vec<Message>,
     ) -> Result<(), Error> {
         if !self.has_partitions() {
-            return Err(Error::NoPartitions(self.id, self.stream_id));
+            return Err(Error::NoPartitions(self.topic_id, self.stream_id));
         }
 
         if messages.is_empty() {
@@ -73,7 +84,11 @@ impl Topic {
     ) -> Result<(), Error> {
         let partition = self.partitions.get(&partition_id);
         if partition.is_none() {
-            return Err(Error::PartitionNotFound(partition_id));
+            return Err(Error::PartitionNotFound(
+                partition_id,
+                self.stream_id,
+                self.stream_id,
+            ));
         }
 
         let partition = partition.unwrap();
@@ -119,7 +134,10 @@ impl Topic {
         for (_, partition) in self.partitions.iter_mut() {
             let mut partition = partition.write().await;
             if partition.segments.is_empty() {
-                trace!("No segments found for partition with ID: {}", partition.id);
+                trace!(
+                    "No segments found for partition with ID: {}",
+                    partition.partition_id
+                );
                 continue;
             }
 
@@ -134,7 +152,7 @@ impl Topic {
             trace!(
                 "Loading {} messages for partition with ID: {} for topic with ID: {} and stream with ID: {} from offset: {} to offset: {}...",
                 messages_count,
-                partition.id,
+                partition.partition_id,
                 partition.topic_id,
                 partition.stream_id,
                 start_offset,
@@ -155,7 +173,7 @@ impl Topic {
             trace!(
                 "Loaded {} messages for partition with ID: {} for topic with ID: {} and stream with ID: {} from offset: {} to offset: {}.",
                 messages_count,
-                partition.id,
+                partition.partition_id,
                 partition.topic_id,
                 partition.stream_id,
                 start_offset,
@@ -165,15 +183,36 @@ impl Topic {
 
         Ok(())
     }
+
+    pub async fn get_expired_segments_start_offsets_per_partition(
+        &self,
+        now: u64,
+    ) -> HashMap<u32, Vec<u64>> {
+        let mut expired_segments = HashMap::new();
+        if self.message_expiry.is_none() {
+            return expired_segments;
+        }
+
+        for (_, partition) in self.partitions.iter() {
+            let partition = partition.read().await;
+            let segments = partition.get_expired_segments_start_offsets(now).await;
+            if !segments.is_empty() {
+                expired_segments.insert(partition.partition_id, segments);
+            }
+        }
+
+        expired_segments
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::TopicConfig;
+    use crate::config::SystemConfig;
     use crate::storage::tests::get_test_system_storage;
     use bytes::Bytes;
-    use iggy::models::message::MessageState;
+    use iggy::models::messages::MessageState;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn given_partition_id_key_messages_should_be_appended_only_to_the_chosen_partition() {
@@ -204,7 +243,7 @@ mod tests {
         for partition in partitions {
             let partition = partition.read().await;
             let messages = partition.messages.as_ref().unwrap().to_vec();
-            if partition.id == partition_id {
+            if partition.partition_id == partition_id {
                 assert_eq!(messages.len() as u32, messages_count);
             } else {
                 assert_eq!(messages.len() as u32, 0);
@@ -290,19 +329,9 @@ mod tests {
         let storage = Arc::new(get_test_system_storage());
         let stream_id = 1;
         let id = 2;
-        let topics_path = "/topics";
         let name = "test";
-        let config = Arc::new(TopicConfig::default());
+        let config = Arc::new(SystemConfig::default());
 
-        Topic::create(
-            stream_id,
-            id,
-            name,
-            partitions_count,
-            topics_path,
-            config,
-            storage,
-        )
-        .unwrap()
+        Topic::create(stream_id, id, name, partitions_count, config, storage, None).unwrap()
     }
 }

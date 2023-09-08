@@ -28,12 +28,7 @@ impl System {
             }
 
             let stream_id = stream_id.unwrap();
-            let stream = Stream::empty(
-                stream_id,
-                &self.streams_path,
-                self.config.stream.clone(),
-                self.storage.clone(),
-            );
+            let stream = Stream::empty(stream_id, self.config.clone(), self.storage.clone());
             unloaded_streams.push(stream);
         }
 
@@ -136,13 +131,7 @@ impl System {
             return Err(Error::StreamNameAlreadyExists(name.to_string()));
         }
 
-        let stream = Stream::create(
-            id,
-            &name,
-            &self.streams_path,
-            self.config.stream.clone(),
-            self.storage.clone(),
-        );
+        let stream = Stream::create(id, &name, self.config.clone(), self.storage.clone());
         stream.persist().await?;
         info!("Created stream with ID: {}, name: '{}'.", id, name);
         self.streams_ids.insert(name, stream.id);
@@ -150,38 +139,49 @@ impl System {
         Ok(())
     }
 
-    pub async fn delete_stream(&mut self, id: &Identifier) -> Result<(), Error> {
-        let stream = match id.kind {
-            IdKind::Numeric => {
-                let stream_id = id.get_u32_value().unwrap();
-                let stream = self.streams.remove(&stream_id);
-                if stream.is_none() {
-                    return Err(Error::StreamIdNotFound(stream_id));
+    pub async fn update_stream(&mut self, id: &Identifier, name: &str) -> Result<(), Error> {
+        let stream_id;
+        {
+            let stream = self.get_stream(id)?;
+            stream_id = stream.id;
+        }
+
+        let updated_name = text::to_lowercase_non_whitespace(name);
+
+        {
+            if let Some(stream_id_by_name) = self.streams_ids.get(&updated_name) {
+                if *stream_id_by_name != stream_id {
+                    return Err(Error::StreamNameAlreadyExists(updated_name.clone()));
                 }
-
-                let stream = stream.unwrap();
-                self.streams_ids.remove(&stream.name);
-                stream
             }
-            IdKind::String => {
-                let stream_name = id.get_string_value().unwrap();
-                let stream_id = self.streams_ids.remove(&stream_name);
-                if stream_id.is_none() {
-                    return Err(Error::StreamNameNotFound(stream_name));
-                }
+        }
 
-                let stream_id = stream_id.unwrap();
-                let topic = self.streams.remove(&stream_id);
-                topic.unwrap()
-            }
-        };
+        {
+            self.streams_ids.remove(&updated_name.clone());
+            self.streams_ids.insert(updated_name.clone(), stream_id);
+            let stream = self.get_stream_mut(id)?;
+            stream.name = updated_name;
+            stream.persist().await?;
+            info!("Updated stream: {} with ID: {}", stream.name, id);
+        }
 
-        stream.delete().await?;
+        Ok(())
+    }
+
+    pub async fn delete_stream(&mut self, id: &Identifier) -> Result<u32, Error> {
+        let stream = self.get_stream(id)?;
+        let stream_id = stream.id;
+        let stream_name = stream.name.clone();
+        if stream.delete().await.is_err() {
+            return Err(Error::CannotDeleteStream(stream_id));
+        }
+        self.streams.remove(&stream_id);
+        self.streams_ids.remove(&stream_name);
         let client_manager = self.client_manager.read().await;
         client_manager
-            .delete_consumer_groups_for_stream(stream.id)
+            .delete_consumer_groups_for_stream(stream_id)
             .await;
-        Ok(())
+        Ok(stream_id)
     }
 }
 

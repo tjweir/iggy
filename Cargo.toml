@@ -2,13 +2,5 @@
 lto = true
 
 [workspace]
-
-members = [
-    "bench",
-    "client",
-    "samples",
-    "iggy",
-    "server",
-    "streaming",
-    "tools"
-]
+resolver = "2"
+members = ["bench", "cli", "samples", "iggy", "server", "streaming", "tools"]

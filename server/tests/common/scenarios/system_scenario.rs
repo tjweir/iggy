@@ -2,7 +2,7 @@ use crate::common::{ClientFactory, TestServer};
 use bytes::Bytes;
 use iggy::client::{
     ConsumerGroupClient, ConsumerOffsetClient, MessageClient, PartitionClient, StreamClient,
-    SystemClient, TopicClient,
+    SystemClient, TopicClient, UserClient,
 };
 use iggy::clients::client::{IggyClient, IggyClientConfig};
 use iggy::consumer::{Consumer, ConsumerKind};
@@ -24,6 +24,7 @@ use iggy::streams::create_stream::CreateStream;
 use iggy::streams::delete_stream::DeleteStream;
 use iggy::streams::get_stream::GetStream;
 use iggy::streams::get_streams::GetStreams;
+use iggy::streams::update_stream::UpdateStream;
 use iggy::system::get_clients::GetClients;
 use iggy::system::get_me::GetMe;
 use iggy::system::get_stats::GetStats;
@@ -32,7 +33,8 @@ use iggy::topics::create_topic::CreateTopic;
 use iggy::topics::delete_topic::DeleteTopic;
 use iggy::topics::get_topic::GetTopic;
 use iggy::topics::get_topics::GetTopics;
-use tokio::time::sleep;
+use iggy::topics::update_topic::UpdateTopic;
+use iggy::users::login_user::LoginUser;
 
 const STREAM_ID: u32 = 1;
 const TOPIC_ID: u32 = 1;
@@ -44,14 +46,24 @@ const STREAM_NAME: &str = "test-stream";
 const TOPIC_NAME: &str = "test-topic";
 const CONSUMER_GROUP_ID: u32 = 1;
 const MESSAGES_COUNT: u32 = 1000;
+const USERNAME: &str = "iggy";
+const PASSWORD: &str = "iggy";
 
 #[allow(dead_code)]
 pub async fn run(client_factory: &dyn ClientFactory) {
-    let test_server = TestServer::default();
+    let mut test_server = TestServer::default();
     test_server.start();
-    sleep(std::time::Duration::from_secs(1)).await;
     let client = client_factory.create_client().await;
     let client = IggyClient::new(client, IggyClientConfig::default(), None, None);
+
+    // 0. Login user
+    client
+        .login_user(&LoginUser {
+            username: USERNAME.to_string(),
+            password: PASSWORD.to_string(),
+        })
+        .await
+        .unwrap();
 
     // 1. Ping server
     let ping = Ping {};
@@ -119,6 +131,7 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         topic_id: TOPIC_ID,
         partitions_count: PARTITIONS_COUNT,
         name: TOPIC_NAME.to_string(),
+        message_expiry: None,
     };
     client.create_topic(&create_topic).await.unwrap();
 
@@ -136,6 +149,7 @@ pub async fn run(client_factory: &dyn ClientFactory) {
     assert_eq!(topic.partitions_count, PARTITIONS_COUNT);
     assert_eq!(topic.size_bytes, 0);
     assert_eq!(topic.messages_count, 0);
+    assert_eq!(topic.message_expiry, None);
 
     // 11. Get topic details by ID
     let topic = client
@@ -231,17 +245,17 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         },
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: PARTITION_ID,
+        partition_id: Some(PARTITION_ID),
         strategy: PollingStrategy::offset(0),
         count: MESSAGES_COUNT,
         auto_commit: false,
     };
 
-    let messages = client.poll_messages(&poll_messages).await.unwrap();
-    assert_eq!(messages.len() as u32, MESSAGES_COUNT);
+    let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+    assert_eq!(polled_messages.messages.len() as u32, MESSAGES_COUNT);
     for i in 0..MESSAGES_COUNT {
         let offset = i as u64;
-        let message = messages.get(i as usize).unwrap();
+        let message = polled_messages.messages.get(i as usize).unwrap();
         assert_message(message, offset);
     }
 
@@ -257,17 +271,17 @@ pub async fn run(client_factory: &dyn ClientFactory) {
             },
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
             topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-            partition_id: PARTITION_ID,
+            partition_id: Some(PARTITION_ID),
             strategy: PollingStrategy::offset(start_offset),
             count: batch_size,
             auto_commit: false,
         };
 
-        let messages = client.poll_messages(&poll_messages).await.unwrap();
-        assert_eq!(messages.len() as u32, batch_size);
+        let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+        assert_eq!(polled_messages.messages.len() as u32, batch_size);
         for i in 0..batch_size as u64 {
             let offset = start_offset + i;
-            let message = messages.get(i as usize).unwrap();
+            let message = polled_messages.messages.get(i as usize).unwrap();
             assert_message(message, offset);
         }
     }
@@ -301,13 +315,13 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         },
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: PARTITION_ID + 1,
+        partition_id: Some(PARTITION_ID + 1),
         strategy: PollingStrategy::offset(0),
         count: MESSAGES_COUNT,
         auto_commit: false,
     };
-    let messages = client.poll_messages(&poll_messages).await.unwrap();
-    assert!(messages.is_empty());
+    let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+    assert!(polled_messages.messages.is_empty());
 
     // 22. Get the existing customer offset and ensure it's 0
     let offset = client
@@ -318,12 +332,13 @@ pub async fn run(client_factory: &dyn ClientFactory) {
             },
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
             topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-            partition_id: PARTITION_ID,
+            partition_id: Some(PARTITION_ID),
         })
         .await
         .unwrap();
-    assert_eq!(offset.consumer_id, CONSUMER_ID);
-    assert_eq!(offset.offset, 0);
+    assert_eq!(offset.partition_id, PARTITION_ID);
+    assert_eq!(offset.current_offset, (MESSAGES_COUNT - 1) as u64);
+    assert_eq!(offset.stored_offset, 0);
 
     // 23. Store the consumer offset
     let stored_offset = 10;
@@ -335,7 +350,7 @@ pub async fn run(client_factory: &dyn ClientFactory) {
             },
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
             topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-            partition_id: PARTITION_ID,
+            partition_id: Some(PARTITION_ID),
             offset: stored_offset,
         })
         .await
@@ -350,12 +365,13 @@ pub async fn run(client_factory: &dyn ClientFactory) {
             },
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
             topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-            partition_id: PARTITION_ID,
+            partition_id: Some(PARTITION_ID),
         })
         .await
         .unwrap();
-    assert_eq!(offset.consumer_id, CONSUMER_ID);
-    assert_eq!(offset.offset, stored_offset);
+    assert_eq!(offset.partition_id, PARTITION_ID);
+    assert_eq!(offset.current_offset, (MESSAGES_COUNT - 1) as u64);
+    assert_eq!(offset.stored_offset, stored_offset);
 
     // 25. Poll messages from the specific partition in topic using next with auto commit
     let messages_count = 10;
@@ -366,16 +382,16 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         },
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: PARTITION_ID,
+        partition_id: Some(PARTITION_ID),
         strategy: PollingStrategy::next(),
         count: messages_count,
         auto_commit: true,
     };
 
-    let messages = client.poll_messages(&poll_messages).await.unwrap();
-    assert_eq!(messages.len() as u32, messages_count);
-    let first_offset = messages.first().unwrap().offset;
-    let last_offset = messages.last().unwrap().offset;
+    let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+    assert_eq!(polled_messages.messages.len() as u32, messages_count);
+    let first_offset = polled_messages.messages.first().unwrap().offset;
+    let last_offset = polled_messages.messages.last().unwrap().offset;
     let expected_last_offset = stored_offset + messages_count as u64;
     assert_eq!(first_offset, stored_offset + 1);
     assert_eq!(last_offset, expected_last_offset);
@@ -389,12 +405,13 @@ pub async fn run(client_factory: &dyn ClientFactory) {
             },
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
             topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-            partition_id: PARTITION_ID,
+            partition_id: Some(PARTITION_ID),
         })
         .await
         .unwrap();
-    assert_eq!(offset.consumer_id, CONSUMER_ID);
-    assert_eq!(offset.offset, expected_last_offset);
+    assert_eq!(offset.partition_id, PARTITION_ID);
+    assert_eq!(offset.current_offset, (MESSAGES_COUNT - 1) as u64);
+    assert_eq!(offset.stored_offset, expected_last_offset);
 
     // 27. Get the consumer groups and validate that there are no groups
     let consumer_groups = client
@@ -515,15 +532,6 @@ pub async fn run(client_factory: &dyn ClientFactory) {
     assert!(!stats.os_name.is_empty());
     assert!(!stats.os_version.is_empty());
     assert!(!stats.kernel_version.is_empty());
-    #[cfg(not(target_os = "windows"))]
-    {
-        assert!(stats.process_id > 0);
-        assert!(stats.memory_usage > 0);
-        assert!(stats.total_memory > 0);
-        assert!(stats.available_memory > 0);
-        assert!(stats.run_time > 0);
-        assert!(stats.start_time > 0);
-    }
     assert_eq!(stats.streams_count, 1);
     assert_eq!(stats.topics_count, 1);
     assert_eq!(stats.partitions_count, PARTITIONS_COUNT);
@@ -580,7 +588,32 @@ pub async fn run(client_factory: &dyn ClientFactory) {
 
     assert_eq!(topic.partitions_count, PARTITIONS_COUNT);
 
-    // 36. Delete the existing topic and ensure it doesn't exist anymore
+    // 36. Update the existing topic and ensure it's updated
+    let updated_topic_name = format!("{}-updated", TOPIC_NAME);
+    let updated_message_expiry = 1000;
+
+    client
+        .update_topic(&UpdateTopic {
+            stream_id: Identifier::numeric(STREAM_ID).unwrap(),
+            topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
+            name: updated_topic_name.clone(),
+            message_expiry: Some(updated_message_expiry),
+        })
+        .await
+        .unwrap();
+
+    let updated_topic = client
+        .get_topic(&GetTopic {
+            stream_id: Identifier::numeric(STREAM_ID).unwrap(),
+            topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(updated_topic.name, updated_topic_name);
+    assert_eq!(updated_topic.message_expiry, Some(updated_message_expiry));
+
+    // 37. Delete the existing topic and ensure it doesn't exist anymore
     client
         .delete_topic(&DeleteTopic {
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
@@ -596,7 +629,27 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         .unwrap();
     assert!(topics.is_empty());
 
-    // 37. Delete the existing stream and ensure it doesn't exist anymore
+    // 38. Update the existing stream and ensure it's updated
+    let updated_stream_name = format!("{}-updated", STREAM_NAME);
+
+    client
+        .update_stream(&UpdateStream {
+            stream_id: Identifier::numeric(STREAM_ID).unwrap(),
+            name: updated_stream_name.clone(),
+        })
+        .await
+        .unwrap();
+
+    let updated_stream = client
+        .get_stream(&GetStream {
+            stream_id: Identifier::numeric(STREAM_ID).unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(updated_stream.name, updated_stream_name);
+
+    // 39. Delete the existing stream and ensure it doesn't exist anymore
     client
         .delete_stream(&DeleteStream {
             stream_id: Identifier::numeric(STREAM_ID).unwrap(),
@@ -606,7 +659,7 @@ pub async fn run(client_factory: &dyn ClientFactory) {
     let streams = client.get_streams(&GetStreams {}).await.unwrap();
     assert!(streams.is_empty());
 
-    // 38. Get clients and ensure that there's 0 (HTTP) or 1 (TCP, QUIC) client
+    // 40. Get clients and ensure that there's 0 (HTTP) or 1 (TCP, QUIC) client
     let clients = client.get_clients(&GetClients {}).await.unwrap();
 
     assert!(clients.len() <= 1);
@@ -614,7 +667,7 @@ pub async fn run(client_factory: &dyn ClientFactory) {
     test_server.stop();
 }
 
-fn assert_message(message: &iggy::models::message::Message, offset: u64) {
+fn assert_message(message: &iggy::models::messages::Message, offset: u64) {
     let expected_payload = get_message_payload(offset);
     assert!(message.timestamp > 0);
     assert_eq!(message.offset, offset);

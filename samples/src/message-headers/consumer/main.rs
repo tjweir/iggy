@@ -7,7 +7,7 @@ use iggy::consumer::{Consumer, ConsumerKind};
 use iggy::identifier::Identifier;
 use iggy::messages::poll_messages::{PollMessages, PollingStrategy};
 use iggy::models::header::HeaderKey;
-use iggy::models::message::Message;
+use iggy::models::messages::Message;
 use samples::shared::args::Args;
 use samples::shared::messages::*;
 use samples::shared::system;
@@ -53,7 +53,7 @@ async fn consume_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dy
                 },
                 stream_id: Identifier::numeric(args.stream_id)?,
                 topic_id: Identifier::numeric(args.topic_id)?,
-                partition_id: args.partition_id,
+                partition_id: Some(args.partition_id),
                 strategy: PollingStrategy::next(),
                 count: args.messages_per_batch,
                 auto_commit: true,
@@ -88,15 +88,15 @@ fn handle_message(message: &Message) -> Result<(), Box<dyn Error>> {
     );
     match message_type {
         ORDER_CREATED_TYPE => {
-            let order_created = serde_json::from_str::<OrderCreated>(&payload)?;
+            let order_created = serde_json::from_str::<OrderCreated>(payload)?;
             info!("{:#?}", order_created);
         }
         ORDER_CONFIRMED_TYPE => {
-            let order_confirmed = serde_json::from_str::<OrderConfirmed>(&payload)?;
+            let order_confirmed = serde_json::from_str::<OrderConfirmed>(payload)?;
             info!("{:#?}", order_confirmed);
         }
         ORDER_REJECTED_TYPE => {
-            let order_rejected = serde_json::from_str::<OrderRejected>(&payload)?;
+            let order_rejected = serde_json::from_str::<OrderRejected>(payload)?;
             info!("{:#?}", order_rejected);
         }
         _ => {

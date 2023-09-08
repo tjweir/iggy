@@ -3,7 +3,7 @@ use crate::polling_consumer::PollingConsumer;
 use crate::segments::segment::Segment;
 use crate::utils::random_id;
 use iggy::error::Error;
-use iggy::models::message::Message;
+use iggy::models::messages::Message;
 use ringbuffer::RingBuffer;
 use std::sync::Arc;
 use tracing::{error, trace, warn};
@@ -19,7 +19,7 @@ impl Partition {
         trace!(
             "Getting messages by timestamp: {} for partition: {}...",
             timestamp,
-            self.id
+            self.partition_id
         );
         if self.segments.is_empty() {
             return Ok(EMPTY_MESSAGES);
@@ -76,7 +76,7 @@ impl Partition {
         trace!(
             "Getting messages for start offset: {} for partition: {}...",
             start_offset,
-            self.id
+            self.partition_id
         );
         if self.segments.is_empty() {
             return Ok(EMPTY_MESSAGES);
@@ -121,7 +121,7 @@ impl Partition {
         count: u32,
     ) -> Result<Vec<Arc<Message>>, Error> {
         let (consumer_offsets, consumer_id) = match consumer {
-            PollingConsumer::Consumer(consumer_id) => {
+            PollingConsumer::Consumer(consumer_id, _) => {
                 (self.consumer_offsets.read().await, consumer_id)
             }
             PollingConsumer::ConsumerGroup(consumer_group_id, _) => {
@@ -134,7 +134,7 @@ impl Partition {
             trace!(
                 "Consumer: {} hasn't stored offset for partition: {}, returning the first messages...",
                 consumer_id,
-                self.id
+                self.partition_id
             );
             return self.get_first_messages(count).await;
         }
@@ -145,7 +145,7 @@ impl Partition {
                 "Consumer: {} has the latest offset: {} for partition: {}, returning empty messages...",
                 consumer_id,
                 consumer_offset.offset,
-                self.id
+                self.partition_id
             );
             return Ok(EMPTY_MESSAGES);
         }
@@ -154,7 +154,7 @@ impl Partition {
         trace!(
             "Getting next messages for {} for partition: {} from offset: {}...",
             consumer_id,
-            self.id,
+            self.partition_id,
             offset
         );
 
@@ -213,7 +213,7 @@ impl Partition {
         trace!(
             "First buffered offset: {} for partition: {}",
             first_buffered_offset,
-            self.id
+            self.partition_id
         );
 
         if start_offset >= first_buffered_offset {
@@ -278,9 +278,9 @@ impl Partition {
             let start_offset = segment.end_offset + 1;
             trace!(
                 "Current segment is closed, creating new segment with start offset: {} for partition with ID: {}...",
-                start_offset, self.id
+                start_offset, self.partition_id
             );
-            self.process_new_segment(start_offset).await?;
+            self.add_persisted_segment(start_offset).await?;
             segment = self.segments.last_mut().unwrap();
         }
 
@@ -289,7 +289,7 @@ impl Partition {
             "Appending {} messages to segment with start offset: {} for partition with ID: {}...",
             messages_count,
             segment.start_offset,
-            self.id
+            self.partition_id
         );
 
         let deduplicate_messages = self.message_ids.is_some();
@@ -302,7 +302,7 @@ impl Partition {
                 if message_ids.contains_key(&message.id) {
                     warn!(
                         "Ignored the duplicated message ID: {} for partition with ID: {}.",
-                        message.id, self.id
+                        message.id, self.partition_id
                     );
                     continue;
                 }
@@ -319,7 +319,7 @@ impl Partition {
                 "Appending the message with offset: {} to segment with start offset: {} for partition with ID: {}...",
                 self.current_offset,
                 segment.start_offset,
-                self.id
+                self.partition_id
             );
 
             message.offset = self.current_offset;
@@ -333,7 +333,7 @@ impl Partition {
                 "Appended the message with offset: {} to segment with start offset: {} for partition with ID: {}.",
                 self.current_offset,
                 segment.start_offset,
-                self.id
+                self.partition_id
             );
         }
 
@@ -341,42 +341,23 @@ impl Partition {
             "Appended {} messages to segment with start offset: {} for partition with ID: {}.",
             messages_count,
             segment.start_offset,
-            self.id
+            self.partition_id
         );
 
         self.unsaved_messages_count += messages_count;
-        if self.unsaved_messages_count >= self.config.messages_required_to_save || segment.is_full()
+        if self.unsaved_messages_count >= self.config.partition.messages_required_to_save
+            || segment.is_full().await
         {
             trace!(
             "Segment with start offset: {} for partition with ID: {} will be persisted on disk...",
             segment.start_offset,
-            self.id
+            self.partition_id
         );
             segment
                 .persist_messages(self.storage.segment.clone())
                 .await?;
             self.unsaved_messages_count = 0;
         }
-
-        Ok(())
-    }
-
-    async fn process_new_segment(&mut self, start_offset: u64) -> Result<(), Error> {
-        trace!(
-            "Current segment is full, creating new segment for partition with ID: {}",
-            self.id
-        );
-        let new_segment = Segment::create(
-            self.stream_id,
-            self.topic_id,
-            self.id,
-            start_offset,
-            &self.path,
-            self.config.segment.clone(),
-            self.storage.clone(),
-        );
-        new_segment.persist().await?;
-        self.segments.push(new_segment);
 
         Ok(())
     }

@@ -26,9 +26,6 @@ GET {{url}}/ping
 GET {{url}}/stats
 
 ###
-POST {{url}}/kill
-
-###
 GET {{url}}/streams
 
 ###
@@ -40,6 +37,14 @@ Content-Type: application/json
 
 {
   "stream_id": {{stream_id}},
+  "name": "stream1"
+}
+
+###
+PUT {{url}}/streams/{{stream_id}}
+Content-Type: application/json
+
+{
   "name": "stream1"
 }
 
@@ -59,7 +64,17 @@ Content-Type: application/json
 {
   "topic_id": {{topic_id}},
   "name": "topic1",
-  "partitions_count": 3
+  "partitions_count": 3,
+  "message_expiry": 0
+}
+
+###
+PUT {{url}}/streams/{{stream_id}}/topics/{{topic_id}}
+Content-Type: application/json
+
+{
+  "name": "topic1",
+  "message_expiry": 1000
 }
 
 ###

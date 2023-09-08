@@ -2,29 +2,27 @@ mod common;
 
 use crate::common::TestSetup;
 use ringbuffer::RingBuffer;
-use std::sync::Arc;
 use streaming::partitions::partition::Partition;
 use streaming::segments::segment::{INDEX_EXTENSION, LOG_EXTENSION, TIME_INDEX_EXTENSION};
-use streaming::storage::SystemStorage;
 use tokio::fs;
 
 #[tokio::test]
 async fn should_persist_partition_with_segment() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let with_segment = true;
     let stream_id = 1;
     let topic_id = 2;
+    setup.create_partitions_directory(stream_id, topic_id).await;
     let partition_ids = get_partition_ids();
     for partition_id in partition_ids {
         let partition = Partition::create(
             stream_id,
             topic_id,
             partition_id,
-            &setup.path,
             with_segment,
-            setup.config.stream.topic.partition.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         );
 
         partition.persist().await.unwrap();
@@ -36,20 +34,20 @@ async fn should_persist_partition_with_segment() {
 #[tokio::test]
 async fn should_load_existing_partition_from_disk() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let with_segment = true;
     let stream_id = 1;
     let topic_id = 2;
+    setup.create_partitions_directory(stream_id, topic_id).await;
     let partition_ids = get_partition_ids();
     for partition_id in partition_ids {
         let partition = Partition::create(
             stream_id,
             topic_id,
             partition_id,
-            &setup.path,
             with_segment,
-            setup.config.stream.topic.partition.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         );
         partition.persist().await.unwrap();
         assert_persisted_partition(&partition.path, with_segment).await;
@@ -57,15 +55,14 @@ async fn should_load_existing_partition_from_disk() {
         let mut loaded_partition = Partition::empty(
             stream_id,
             topic_id,
-            partition.id,
-            &setup.path,
-            setup.config.stream.topic.partition.clone(),
-            storage.clone(),
+            partition.partition_id,
+            setup.config.clone(),
+            setup.storage.clone(),
         );
         loaded_partition.load().await.unwrap();
 
         assert_eq!(loaded_partition.stream_id, partition.stream_id);
-        assert_eq!(loaded_partition.id, partition.id);
+        assert_eq!(loaded_partition.partition_id, partition.partition_id);
         assert_eq!(loaded_partition.path, partition.path);
         assert_eq!(loaded_partition.offsets_path, partition.offsets_path);
         assert_eq!(loaded_partition.current_offset, partition.current_offset);
@@ -95,20 +92,20 @@ async fn should_load_existing_partition_from_disk() {
 #[tokio::test]
 async fn should_delete_existing_partition_from_disk() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let with_segment = true;
     let stream_id = 1;
     let topic_id = 2;
+    setup.create_partitions_directory(stream_id, topic_id).await;
     let partition_ids = get_partition_ids();
     for partition_id in partition_ids {
         let partition = Partition::create(
             stream_id,
             topic_id,
             partition_id,
-            &setup.path,
             with_segment,
-            setup.config.stream.topic.partition.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         );
         partition.persist().await.unwrap();
         assert_persisted_partition(&partition.path, with_segment).await;

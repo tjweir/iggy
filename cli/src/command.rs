@@ -1,4 +1,6 @@
-use crate::{consumer_groups, consumer_offsets, messages, partitions, streams, system, topics};
+use crate::{
+    consumer_groups, consumer_offsets, messages, partitions, streams, system, topics, users,
+};
 use iggy::client_error::ClientError;
 use iggy::clients::client::IggyClient;
 use iggy::command::Command;
@@ -10,12 +12,12 @@ pub async fn handle(input: &str, client: &IggyClient) -> Result<(), ClientError>
     let command = Command::from_str(input).map_err(|_| ClientError::InvalidCommand)?;
     info!("Handling '{}' command...", command);
     match command {
-        Command::Kill(payload) => system::kill(&payload, client).await,
         Command::Ping(payload) => system::ping(&payload, client).await,
         Command::GetStats(payload) => system::get_stats(&payload, client).await,
         Command::GetMe(payload) => system::get_me(&payload, client).await,
         Command::GetClient(payload) => system::get_client(&payload, client).await,
         Command::GetClients(payload) => system::get_clients(&payload, client).await,
+        Command::LoginUser(payload) => users::login_user(&payload, client).await,
         Command::SendMessages(mut payload) => messages::send_messages(&mut payload, client).await,
         Command::PollMessages(payload) => {
             let format = match input.split('|').last() {
@@ -39,10 +41,12 @@ pub async fn handle(input: &str, client: &IggyClient) -> Result<(), ClientError>
         Command::GetStreams(payload) => streams::get_streams(&payload, client).await,
         Command::CreateStream(payload) => streams::create_stream(&payload, client).await,
         Command::DeleteStream(payload) => streams::delete_stream(&payload, client).await,
+        Command::UpdateStream(payload) => streams::update_stream(&payload, client).await,
         Command::GetTopic(payload) => topics::get_topic(&payload, client).await,
         Command::GetTopics(payload) => topics::get_topics(&payload, client).await,
         Command::CreateTopic(payload) => topics::create_topic(&payload, client).await,
         Command::DeleteTopic(payload) => topics::delete_topic(&payload, client).await,
+        Command::UpdateTopic(payload) => topics::update_topic(&payload, client).await,
         Command::CreatePartitions(payload) => partitions::create_partitions(&payload, client).await,
         Command::DeletePartitions(payload) => partitions::delete_partitions(&payload, client).await,
         Command::GetGroup(payload) => consumer_groups::get_consumer_group(&payload, client).await,

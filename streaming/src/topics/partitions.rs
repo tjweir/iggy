@@ -20,12 +20,12 @@ impl Topic {
         for partition_id in current_partitions_count + 1..=current_partitions_count + count {
             let partition = Partition::create(
                 self.stream_id,
-                self.id,
+                self.topic_id,
                 partition_id,
-                &self.get_partitions_path(),
                 true,
-                self.config.partition.clone(),
+                self.config.clone(),
                 self.storage.clone(),
+                self.message_expiry,
             );
             self.partitions.insert(partition_id, RwLock::new(partition));
             partition_ids.push(partition_id)

@@ -3,7 +3,7 @@ use crate::segments::segment::Segment;
 use crate::segments::time_index::TimeIndex;
 use crate::storage::SegmentStorage;
 use iggy::error::Error;
-use iggy::models::message::Message;
+use iggy::models::messages::Message;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -213,7 +213,7 @@ impl Segment {
             saved_bytes
         );
 
-        if self.is_full() {
+        if self.is_full().await {
             self.end_offset = self.current_offset;
             self.is_closed = true;
             self.unsaved_messages = None;

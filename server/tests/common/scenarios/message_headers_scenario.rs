@@ -10,7 +10,7 @@ use iggy::models::header::{HeaderKey, HeaderValue};
 use iggy::streams::create_stream::CreateStream;
 use iggy::topics::create_topic::CreateTopic;
 use std::collections::HashMap;
-use tokio::time::sleep;
+use std::str::FromStr;
 
 const STREAM_ID: u32 = 1;
 const TOPIC_ID: u32 = 1;
@@ -22,9 +22,8 @@ const PARTITION_ID: u32 = 1;
 
 #[allow(dead_code)]
 pub async fn run(client_factory: &dyn ClientFactory) {
-    let test_server = TestServer::default();
+    let mut test_server = TestServer::default();
     test_server.start();
-    sleep(std::time::Duration::from_secs(1)).await;
     let client = client_factory.create_client().await;
     let client = IggyClient::new(client, IggyClientConfig::default(), None, None);
     init_system(&client).await;
@@ -56,16 +55,16 @@ pub async fn run(client_factory: &dyn ClientFactory) {
         consumer: Consumer::default(),
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: PARTITION_ID,
+        partition_id: Some(PARTITION_ID),
         strategy: PollingStrategy::offset(0),
         count: MESSAGES_COUNT,
         auto_commit: false,
     };
 
-    let messages = client.poll_messages(&poll_messages).await.unwrap();
-    assert_eq!(messages.len() as u32, MESSAGES_COUNT);
+    let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+    assert_eq!(polled_messages.messages.len() as u32, MESSAGES_COUNT);
     for i in 0..MESSAGES_COUNT {
-        let message = messages.get(i as usize).unwrap();
+        let message = polled_messages.messages.get(i as usize).unwrap();
         assert!(message.headers.is_some());
         let headers = message.headers.as_ref().unwrap();
         assert_eq!(headers.len(), 3);
@@ -77,14 +76,11 @@ pub async fn run(client_factory: &dyn ClientFactory) {
                 .unwrap(),
             "Value 1"
         );
-        assert_eq!(
-            headers
-                .get(&HeaderKey::new("key 2").unwrap())
-                .unwrap()
-                .as_bool()
-                .unwrap(),
-            true
-        );
+        assert!(headers
+            .get(&HeaderKey::new("key 2").unwrap())
+            .unwrap()
+            .as_bool()
+            .unwrap(),);
         assert_eq!(
             headers
                 .get(&HeaderKey::new("key-3").unwrap())
@@ -112,6 +108,7 @@ async fn init_system(client: &IggyClient) {
         topic_id: TOPIC_ID,
         partitions_count: PARTITIONS_COUNT,
         name: TOPIC_NAME.to_string(),
+        message_expiry: None,
     };
     client.create_topic(&create_topic).await.unwrap();
 }

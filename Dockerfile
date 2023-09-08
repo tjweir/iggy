@@ -1,12 +1,12 @@
 FROM rust:latest as builder
 WORKDIR /build
 COPY . /build
-RUN cargo build --bin client --release
-RUN cargo build --bin server --release
+RUN cargo build --bin iggy-cli --release
+RUN cargo build --bin iggy-server --release
 
 FROM gcr.io/distroless/cc
 COPY configs ./configs
-COPY --from=builder /build/target/release/client .
-COPY --from=builder /build/target/release/server .
+COPY --from=builder /build/target/release/iggy-cli .
+COPY --from=builder /build/target/release/iggy-server .
 
-CMD ["/server"]
+CMD ["/iggy-server"]

@@ -11,8 +11,8 @@ use crate::messages::poll_messages::PollMessages;
 use crate::messages::send_messages::SendMessages;
 use crate::models::client_info::{ClientInfo, ClientInfoDetails};
 use crate::models::consumer_group::{ConsumerGroup, ConsumerGroupDetails};
-use crate::models::message::Message;
-use crate::models::offset::Offset;
+use crate::models::consumer_offset_info::ConsumerOffsetInfo;
+use crate::models::messages::PolledMessages;
 use crate::models::stats::Stats;
 use crate::models::stream::{Stream, StreamDetails};
 use crate::models::topic::{Topic, TopicDetails};
@@ -22,22 +22,25 @@ use crate::streams::create_stream::CreateStream;
 use crate::streams::delete_stream::DeleteStream;
 use crate::streams::get_stream::GetStream;
 use crate::streams::get_streams::GetStreams;
+use crate::streams::update_stream::UpdateStream;
 use crate::system::get_client::GetClient;
 use crate::system::get_clients::GetClients;
 use crate::system::get_me::GetMe;
 use crate::system::get_stats::GetStats;
-use crate::system::kill::Kill;
 use crate::system::ping::Ping;
 use crate::topics::create_topic::CreateTopic;
 use crate::topics::delete_topic::DeleteTopic;
 use crate::topics::get_topic::GetTopic;
 use crate::topics::get_topics::GetTopics;
+use crate::topics::update_topic::UpdateTopic;
+use crate::users::login_user::LoginUser;
 use async_trait::async_trait;
 use std::fmt::Debug;
 
 #[async_trait]
 pub trait Client:
     SystemClient
+    + UserClient
     + StreamClient
     + TopicClient
     + PartitionClient
@@ -59,7 +62,11 @@ pub trait SystemClient {
     async fn get_client(&self, command: &GetClient) -> Result<ClientInfoDetails, Error>;
     async fn get_clients(&self, command: &GetClients) -> Result<Vec<ClientInfo>, Error>;
     async fn ping(&self, command: &Ping) -> Result<(), Error>;
-    async fn kill(&self, command: &Kill) -> Result<(), Error>;
+}
+
+#[async_trait]
+pub trait UserClient {
+    async fn login_user(&self, command: &LoginUser) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -67,6 +74,7 @@ pub trait StreamClient {
     async fn get_stream(&self, command: &GetStream) -> Result<StreamDetails, Error>;
     async fn get_streams(&self, command: &GetStreams) -> Result<Vec<Stream>, Error>;
     async fn create_stream(&self, command: &CreateStream) -> Result<(), Error>;
+    async fn update_stream(&self, command: &UpdateStream) -> Result<(), Error>;
     async fn delete_stream(&self, command: &DeleteStream) -> Result<(), Error>;
 }
 
@@ -75,6 +83,7 @@ pub trait TopicClient {
     async fn get_topic(&self, command: &GetTopic) -> Result<TopicDetails, Error>;
     async fn get_topics(&self, command: &GetTopics) -> Result<Vec<Topic>, Error>;
     async fn create_topic(&self, command: &CreateTopic) -> Result<(), Error>;
+    async fn update_topic(&self, command: &UpdateTopic) -> Result<(), Error>;
     async fn delete_topic(&self, command: &DeleteTopic) -> Result<(), Error>;
 }
 
@@ -86,14 +95,17 @@ pub trait PartitionClient {
 
 #[async_trait]
 pub trait MessageClient {
-    async fn poll_messages(&self, command: &PollMessages) -> Result<Vec<Message>, Error>;
+    async fn poll_messages(&self, command: &PollMessages) -> Result<PolledMessages, Error>;
     async fn send_messages(&self, command: &mut SendMessages) -> Result<(), Error>;
 }
 
 #[async_trait]
 pub trait ConsumerOffsetClient {
     async fn store_consumer_offset(&self, command: &StoreConsumerOffset) -> Result<(), Error>;
-    async fn get_consumer_offset(&self, command: &GetConsumerOffset) -> Result<Offset, Error>;
+    async fn get_consumer_offset(
+        &self,
+        command: &GetConsumerOffset,
+    ) -> Result<ConsumerOffsetInfo, Error>;
 }
 
 #[async_trait]

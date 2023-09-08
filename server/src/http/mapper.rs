@@ -13,6 +13,7 @@ pub async fn map_stream(stream: &Stream) -> StreamDetails {
     let topics = map_topics(&stream.get_topics()).await;
     let mut stream_details = StreamDetails {
         id: stream.id,
+        created_at: stream.created_at,
         name: stream.name.clone(),
         topics_count: topics.len() as u32,
         size_bytes: stream.get_size_bytes().await,
@@ -28,6 +29,7 @@ pub async fn map_streams(streams: &[&Stream]) -> Vec<iggy::models::stream::Strea
     for stream in streams {
         let stream = iggy::models::stream::Stream {
             id: stream.id,
+            created_at: stream.created_at,
             name: stream.name.clone(),
             size_bytes: stream.get_size_bytes().await,
             topics_count: stream.get_topics().len() as u32,
@@ -44,11 +46,13 @@ pub async fn map_topics(topics: &[&Topic]) -> Vec<iggy::models::topic::Topic> {
     let mut topics_data = Vec::with_capacity(topics.len());
     for topic in topics {
         let topic = iggy::models::topic::Topic {
-            id: topic.id,
+            id: topic.topic_id,
+            created_at: topic.created_at,
             name: topic.name.clone(),
             size_bytes: topic.get_size_bytes().await,
             partitions_count: topic.get_partitions().len() as u32,
             messages_count: topic.get_messages_count().await,
+            message_expiry: topic.message_expiry,
         };
         topics_data.push(topic);
     }
@@ -58,19 +62,22 @@ pub async fn map_topics(topics: &[&Topic]) -> Vec<iggy::models::topic::Topic> {
 
 pub async fn map_topic(topic: &Topic) -> TopicDetails {
     let mut topic_details = TopicDetails {
-        id: topic.id,
+        id: topic.topic_id,
+        created_at: topic.created_at,
         name: topic.name.clone(),
         size_bytes: topic.get_size_bytes().await,
         messages_count: topic.get_messages_count().await,
         partitions_count: topic.get_partitions().len() as u32,
         partitions: Vec::new(),
+        message_expiry: topic.message_expiry,
     };
     for partition in topic.get_partitions() {
         let partition = partition.read().await;
         topic_details
             .partitions
             .push(iggy::models::partition::Partition {
-                id: partition.id,
+                id: partition.partition_id,
+                created_at: partition.created_at,
                 segments_count: partition.get_segments().len() as u32,
                 current_offset: partition.current_offset,
                 size_bytes: partition.get_size_bytes(),

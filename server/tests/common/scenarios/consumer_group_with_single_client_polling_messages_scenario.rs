@@ -13,7 +13,6 @@ use iggy::streams::delete_stream::DeleteStream;
 use iggy::system::get_me::GetMe;
 use iggy::topics::create_topic::CreateTopic;
 use std::str::{from_utf8, FromStr};
-use tokio::time::sleep;
 
 const STREAM_ID: u32 = 1;
 const TOPIC_ID: u32 = 1;
@@ -25,9 +24,8 @@ const MESSAGES_COUNT: u32 = 1000;
 
 #[allow(dead_code)]
 pub async fn run(client_factory: &dyn ClientFactory) {
-    let test_server = TestServer::default();
+    let mut test_server = TestServer::default();
     test_server.start();
-    sleep(std::time::Duration::from_secs(1)).await;
     let client = client_factory.create_client().await;
     let client = IggyClient::new(client, IggyClientConfig::default(), None, None);
     init_system(&client).await;
@@ -57,6 +55,7 @@ async fn init_system(client: &IggyClient) {
         topic_id: TOPIC_ID,
         partitions_count: PARTITIONS_COUNT,
         name: TOPIC_NAME.to_string(),
+        message_expiry: None,
     };
     client.create_topic(&create_topic).await.unwrap();
 
@@ -116,7 +115,7 @@ async fn execute_using_messages_key_key(client: &IggyClient) {
         consumer: Consumer::group(CONSUMER_GROUP_ID),
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: 0,
+        partition_id: None,
         strategy: PollingStrategy::next(),
         count: 1,
         auto_commit: true,
@@ -124,8 +123,8 @@ async fn execute_using_messages_key_key(client: &IggyClient) {
 
     let mut total_read_messages_count = 0;
     for _ in 1..=PARTITIONS_COUNT * MESSAGES_COUNT {
-        let messages = client.poll_messages(&poll_messages).await.unwrap();
-        total_read_messages_count += messages.len() as u32;
+        let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+        total_read_messages_count += polled_messages.messages.len() as u32;
     }
 
     assert_eq!(total_read_messages_count, MESSAGES_COUNT);
@@ -160,7 +159,7 @@ async fn execute_using_none_key(client: &IggyClient) {
         consumer: Consumer::group(CONSUMER_GROUP_ID),
         stream_id: Identifier::numeric(STREAM_ID).unwrap(),
         topic_id: Identifier::numeric(TOPIC_ID).unwrap(),
-        partition_id: 0,
+        partition_id: None,
         strategy: PollingStrategy::next(),
         count: 1,
         auto_commit: true,
@@ -170,9 +169,9 @@ async fn execute_using_none_key(client: &IggyClient) {
     let mut offset = 0;
     let mut entity_id = 1;
     for _ in 1..=PARTITIONS_COUNT * MESSAGES_COUNT {
-        let messages = client.poll_messages(&poll_messages).await.unwrap();
-        assert_eq!(messages.len(), 1);
-        let message = &messages[0];
+        let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+        assert_eq!(polled_messages.messages.len(), 1);
+        let message = &polled_messages.messages[0];
         assert_eq!(message.offset, offset);
         let payload = from_utf8(&message.payload).unwrap();
         assert_eq!(
@@ -188,8 +187,8 @@ async fn execute_using_none_key(client: &IggyClient) {
     }
 
     for _ in 1..=PARTITIONS_COUNT {
-        let messages = client.poll_messages(&poll_messages).await.unwrap();
-        assert!(messages.is_empty());
+        let polled_messages = client.poll_messages(&poll_messages).await.unwrap();
+        assert!(polled_messages.messages.is_empty());
     }
 }
 

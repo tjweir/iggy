@@ -1,17 +1,15 @@
 mod common;
 
 use crate::common::TestSetup;
-use std::sync::Arc;
-use streaming::storage::SystemStorage;
-use streaming::topics::topic::{Topic, TOPIC_INFO};
+use streaming::topics::topic::Topic;
 use tokio::fs;
 
 #[tokio::test]
 async fn should_persist_topics_with_partitions_directories_and_info_file() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let stream_id = 1;
     let partitions_count = 3;
+    setup.create_topics_directory(stream_id).await;
     let topic_ids = get_topic_ids();
     for topic_id in topic_ids {
         let name = format!("test-{}", topic_id);
@@ -20,23 +18,28 @@ async fn should_persist_topics_with_partitions_directories_and_info_file() {
             topic_id,
             &name,
             partitions_count,
-            &setup.path,
-            setup.config.stream.topic.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         )
         .unwrap();
 
         topic.persist().await.unwrap();
 
-        assert_persisted_topic(&topic.path, &topic.get_partitions_path(), 3).await;
+        assert_persisted_topic(
+            &topic.path,
+            &setup.config.get_partitions_path(stream_id, topic_id),
+            3,
+        )
+        .await;
     }
 }
 
 #[tokio::test]
 async fn should_load_existing_topic_from_disk() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let stream_id = 1;
+    setup.create_topics_directory(stream_id).await;
     let partitions_count = 3;
     let topic_ids = get_topic_ids();
     for topic_id in topic_ids {
@@ -46,25 +49,29 @@ async fn should_load_existing_topic_from_disk() {
             topic_id,
             &name,
             partitions_count,
-            &setup.path,
-            setup.config.stream.topic.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         )
         .unwrap();
         topic.persist().await.unwrap();
-        assert_persisted_topic(&topic.path, &topic.get_partitions_path(), partitions_count).await;
+        assert_persisted_topic(
+            &topic.path,
+            &setup.config.get_partitions_path(stream_id, topic_id),
+            partitions_count,
+        )
+        .await;
 
         let mut loaded_topic = Topic::empty(
             stream_id,
             topic_id,
-            &setup.path,
-            setup.config.stream.topic.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
         );
         loaded_topic.load().await.unwrap();
 
         assert_eq!(loaded_topic.stream_id, topic.stream_id);
-        assert_eq!(loaded_topic.id, topic.id);
+        assert_eq!(loaded_topic.topic_id, topic.topic_id);
         assert_eq!(loaded_topic.name, topic.name);
         assert_eq!(loaded_topic.path, topic.path);
         assert_eq!(loaded_topic.get_partitions().len() as u32, partitions_count);
@@ -74,8 +81,8 @@ async fn should_load_existing_topic_from_disk() {
 #[tokio::test]
 async fn should_delete_existing_topic_from_disk() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let stream_id = 1;
+    setup.create_topics_directory(stream_id).await;
     let partitions_count = 3;
     let topic_ids = get_topic_ids();
     for topic_id in topic_ids {
@@ -85,13 +92,18 @@ async fn should_delete_existing_topic_from_disk() {
             topic_id,
             &name,
             partitions_count,
-            &setup.path,
-            setup.config.stream.topic.clone(),
-            storage.clone(),
+            setup.config.clone(),
+            setup.storage.clone(),
+            None,
         )
         .unwrap();
         topic.persist().await.unwrap();
-        assert_persisted_topic(&topic.path, &topic.get_partitions_path(), partitions_count).await;
+        assert_persisted_topic(
+            &topic.path,
+            &setup.config.get_partitions_path(stream_id, topic_id),
+            partitions_count,
+        )
+        .await;
 
         topic.delete().await.unwrap();
 
@@ -102,9 +114,6 @@ async fn should_delete_existing_topic_from_disk() {
 async fn assert_persisted_topic(topic_path: &str, partitions_path: &str, partitions_count: u32) {
     let topic_metadata = fs::metadata(topic_path).await.unwrap();
     assert!(topic_metadata.is_dir());
-    let topic_info_path = format!("{}/{}", topic_path, TOPIC_INFO);
-    let topic_info_metadata = fs::metadata(&topic_info_path).await.unwrap();
-    assert!(topic_info_metadata.is_file());
     for partition_id in 1..=partitions_count {
         let partition_path = format!("{}/{}", partitions_path, partition_id);
         let partition_metadata = fs::metadata(&partition_path).await.unwrap();

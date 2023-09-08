@@ -9,7 +9,7 @@ mod server_error;
 mod tcp;
 
 use crate::args::Args;
-use crate::components::{channel, config_provider, message_saver};
+use crate::components::{channel, config_provider, message_cleaner, message_saver};
 use crate::http::http_server;
 use crate::quic::quic_server;
 use crate::server_command::ServerCommand;
@@ -18,6 +18,7 @@ use crate::server_error::ServerError;
 use crate::tcp::tcp_server;
 use anyhow::Result;
 use clap::Parser;
+use figlet_rs::FIGfont;
 use std::sync::Arc;
 use streaming::persister::FileWithSyncPersister;
 use streaming::segments::storage::FileSegmentStorage;
@@ -30,12 +31,16 @@ use tracing::info;
 async fn main() -> Result<(), ServerError> {
     let args = Args::parse();
     tracing_subscriber::fmt::init();
+    let standard_font = FIGfont::standard().unwrap();
+    let figure = standard_font.convert("Iggy Server");
+    println!("{}", figure.unwrap());
     let config_provider = config_provider::resolve(&args.config_provider)?;
     let config = ServerConfig::load(config_provider.as_ref()).await?;
-    let mut system = System::new(config.system.clone());
+    let mut system = System::new(config.system.clone(), None);
     system.init().await?;
     let system = Arc::new(RwLock::new(system));
     let (sender, receiver) = flume::unbounded::<ServerCommand>();
+    message_cleaner::start(config.message_cleaner, system.clone());
     message_saver::start(config.message_saver, sender.clone());
     channel::start(system.clone(), receiver);
 

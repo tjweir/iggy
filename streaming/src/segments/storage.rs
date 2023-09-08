@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use iggy::bytes_serializable::BytesSerializable;
 use iggy::error::Error;
-use iggy::models::message::{Message, MessageState};
+use iggy::models::messages::{Message, MessageState};
 use iggy::utils::checksum;
 use std::collections::HashMap;
 use std::io::SeekFrom;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, BufReader};
 use tracing::log::{trace, warn};
@@ -53,7 +54,7 @@ impl Storage<Segment> for FileSegmentStorage {
             segment.start_offset, segment.current_offset, segment.partition_id, segment.topic_id, segment.stream_id, segment.current_size_bytes
         );
 
-        if segment.config.cache_indexes {
+        if segment.config.segment.cache_indexes {
             segment.indexes = Some(segment.storage.segment.load_all_indexes(segment).await?);
             info!(
                 "Loaded {} indexes for segment with start offset: {} and partition with ID: {} for topic with ID: {} and stream with ID: {}.",
@@ -65,7 +66,7 @@ impl Storage<Segment> for FileSegmentStorage {
             );
         }
 
-        if segment.config.cache_time_indexes {
+        if segment.config.segment.cache_time_indexes {
             let time_indexes = self.load_all_time_indexes(segment).await?;
             if !time_indexes.is_empty() {
                 let last_index = time_indexes.last().unwrap();
@@ -95,7 +96,7 @@ impl Storage<Segment> for FileSegmentStorage {
             }
         }
 
-        if segment.is_full() {
+        if segment.is_full().await {
             segment.is_closed = true;
         }
 
@@ -105,38 +106,41 @@ impl Storage<Segment> for FileSegmentStorage {
     async fn save(&self, segment: &Segment) -> Result<(), Error> {
         info!("Saving segment with start offset: {} for partition with ID: {} for topic with ID: {} and stream with ID: {}",
             segment.start_offset, segment.partition_id, segment.topic_id, segment.stream_id);
-        if self
-            .persister
-            .overwrite(&segment.log_path, &[])
-            .await
-            .is_err()
+        if !Path::new(&segment.log_path).exists()
+            && self
+                .persister
+                .overwrite(&segment.log_path, &[])
+                .await
+                .is_err()
         {
             return Err(Error::CannotCreateSegmentLogFile(segment.log_path.clone()));
         }
 
-        if self
-            .persister
-            .overwrite(&segment.time_index_path, &[])
-            .await
-            .is_err()
+        if !Path::new(&segment.time_index_path).exists()
+            && self
+                .persister
+                .overwrite(&segment.time_index_path, &[])
+                .await
+                .is_err()
         {
             return Err(Error::CannotCreateSegmentTimeIndexFile(
                 segment.log_path.clone(),
             ));
         }
 
-        if self
-            .persister
-            .overwrite(&segment.index_path, &[])
-            .await
-            .is_err()
+        if !Path::new(&segment.index_path).exists()
+            && self
+                .persister
+                .overwrite(&segment.index_path, &[])
+                .await
+                .is_err()
         {
             return Err(Error::CannotCreateSegmentIndexFile(
                 segment.log_path.clone(),
             ));
         }
 
-        info!("Created segment log file with start offset: {} for partition with ID: {} for topic with ID: {} and stream with ID: {}",
+        info!("Saved segment log file with start offset: {} for partition with ID: {} for topic with ID: {} and stream with ID: {}",
             segment.start_offset, segment.partition_id, segment.topic_id, segment.stream_id);
 
         Ok(())

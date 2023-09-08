@@ -8,6 +8,7 @@ use tracing::error;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ServerConfig {
+    pub message_cleaner: MessageCleanerConfig,
     pub message_saver: MessageSaverConfig,
     pub system: Arc<SystemConfig>,
     pub quic: QuicConfig,
@@ -77,15 +78,22 @@ pub struct CorsConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct MessageCleanerConfig {
+    pub enabled: bool,
+    pub interval: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MessageSaverConfig {
     pub enabled: bool,
-    pub enforce_sync: bool,
+    pub enforce_fsync: bool,
     pub interval: u64,
 }
 
 impl Default for ServerConfig {
     fn default() -> ServerConfig {
         ServerConfig {
+            message_cleaner: MessageCleanerConfig::default(),
             message_saver: MessageSaverConfig::default(),
             system: Arc::new(SystemConfig::default()),
             quic: QuicConfig::default(),
@@ -143,11 +151,20 @@ impl Default for HttpConfig {
     }
 }
 
+impl Default for MessageCleanerConfig {
+    fn default() -> MessageCleanerConfig {
+        MessageCleanerConfig {
+            enabled: true,
+            interval: 60,
+        }
+    }
+}
+
 impl Default for MessageSaverConfig {
     fn default() -> MessageSaverConfig {
         MessageSaverConfig {
             enabled: true,
-            enforce_sync: true,
+            enforce_fsync: true,
             interval: 1000,
         }
     }
@@ -161,8 +178,9 @@ impl ServerConfig {
     }
 
     fn validate_config(config: &ServerConfig) -> Result<(), ServerError> {
-        let partition_config = &config.system.stream.topic.partition;
-        if partition_config.segment.size_bytes > segment::MAX_SIZE_BYTES {
+        let partition_config = &config.system.partition;
+        let segment_config = &config.system.segment;
+        if segment_config.size_bytes > segment::MAX_SIZE_BYTES {
             error!(
                 "Segment configuration -> size cannot be greater than: {} bytes.",
                 segment::MAX_SIZE_BYTES

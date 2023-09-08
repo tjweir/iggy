@@ -170,7 +170,7 @@ impl Validatable for SendMessages {
         let mut payload_size = 0;
         for message in &self.messages {
             if let Some(headers) = &message.headers {
-                for (_, value) in headers {
+                for value in headers.values() {
                     headers_size += value.value.len() as u32;
                     if headers_size > MAX_HEADERS_SIZE {
                         return Err(Error::TooBigHeadersPayload);
@@ -229,7 +229,7 @@ impl Message {
         headers: Option<HashMap<HeaderKey, HeaderValue>>,
     ) -> Self {
         Message {
-            id: id.unwrap_or_else(|| 0),
+            id: id.unwrap_or(0),
             length: payload.len() as u32,
             payload,
             headers,
@@ -571,7 +571,7 @@ mod tests {
         let message_1 = Message::from_str("hello 1").unwrap();
         let message_2 = Message::from_str("2|hello 2").unwrap();
         let message_3 = Message::from_str("3|hello 3").unwrap();
-        let messages = vec![
+        let messages = [
             message_1.as_bytes(),
             message_2.as_bytes(),
             message_3.as_bytes(),
@@ -604,9 +604,8 @@ mod tests {
         assert_eq!(command.stream_id, stream_id);
         assert_eq!(command.topic_id, topic_id);
         assert_eq!(command.partitioning, key);
-        for i in 0..command.messages.len() {
-            let message = &messages[i];
-            let command_message = &command.messages[i];
+        for (index, message) in command.messages.iter().enumerate() {
+            let command_message = &command.messages[index];
             assert_eq!(command_message.id, message.id);
             assert_eq!(command_message.length, message.length);
             assert_eq!(command_message.payload, message.payload);

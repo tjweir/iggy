@@ -16,22 +16,22 @@ use crate::streams::create_stream::CreateStream;
 use crate::streams::delete_stream::DeleteStream;
 use crate::streams::get_stream::GetStream;
 use crate::streams::get_streams::GetStreams;
+use crate::streams::update_stream::UpdateStream;
 use crate::system::get_client::GetClient;
 use crate::system::get_clients::GetClients;
 use crate::system::get_me::GetMe;
 use crate::system::get_stats::GetStats;
-use crate::system::kill::Kill;
 use crate::system::ping::Ping;
 use crate::topics::create_topic::CreateTopic;
 use crate::topics::delete_topic::DeleteTopic;
 use crate::topics::get_topic::GetTopic;
 use crate::topics::get_topics::GetTopics;
+use crate::topics::update_topic::UpdateTopic;
+use crate::users::login_user::LoginUser;
 use bytes::BufMut;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-pub const KILL: &str = "kill";
-pub const KILL_CODE: u32 = 0;
 pub const PING: &str = "ping";
 pub const PING_CODE: u32 = 1;
 pub const GET_STATS: &str = "stats";
@@ -42,6 +42,8 @@ pub const GET_CLIENT: &str = "client.get";
 pub const GET_CLIENT_CODE: u32 = 21;
 pub const GET_CLIENTS: &str = "client.list";
 pub const GET_CLIENTS_CODE: u32 = 22;
+pub const LOGIN_USER: &str = "user.login";
+pub const LOGIN_USER_CODE: u32 = 32;
 pub const POLL_MESSAGES: &str = "message.poll";
 pub const POLL_MESSAGES_CODE: u32 = 100;
 pub const SEND_MESSAGES: &str = "message.send";
@@ -58,6 +60,8 @@ pub const CREATE_STREAM: &str = "stream.create";
 pub const CREATE_STREAM_CODE: u32 = 202;
 pub const DELETE_STREAM: &str = "stream.delete";
 pub const DELETE_STREAM_CODE: u32 = 203;
+pub const UPDATE_STREAM: &str = "stream.update";
+pub const UPDATE_STREAM_CODE: u32 = 204;
 pub const GET_TOPIC: &str = "topic.get";
 pub const GET_TOPIC_CODE: u32 = 300;
 pub const GET_TOPICS: &str = "topic.list";
@@ -66,6 +70,8 @@ pub const CREATE_TOPIC: &str = "topic.create";
 pub const CREATE_TOPIC_CODE: u32 = 302;
 pub const DELETE_TOPIC: &str = "topic.delete";
 pub const DELETE_TOPIC_CODE: u32 = 303;
+pub const UPDATE_TOPIC: &str = "topic.update";
+pub const UPDATE_TOPIC_CODE: u32 = 304;
 pub const CREATE_PARTITIONS: &str = "partition.create";
 pub const CREATE_PARTITIONS_CODE: u32 = 402;
 pub const DELETE_PARTITIONS: &str = "partition.delete";
@@ -85,12 +91,12 @@ pub const LEAVE_CONSUMER_GROUP_CODE: u32 = 605;
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    Kill(Kill),
     Ping(Ping),
     GetStats(GetStats),
     GetMe(GetMe),
     GetClient(GetClient),
     GetClients(GetClients),
+    LoginUser(LoginUser),
     SendMessages(SendMessages),
     PollMessages(PollMessages),
     GetConsumerOffset(GetConsumerOffset),
@@ -99,10 +105,12 @@ pub enum Command {
     GetStreams(GetStreams),
     CreateStream(CreateStream),
     DeleteStream(DeleteStream),
+    UpdateStream(UpdateStream),
     GetTopic(GetTopic),
     GetTopics(GetTopics),
     CreateTopic(CreateTopic),
     DeleteTopic(DeleteTopic),
+    UpdateTopic(UpdateTopic),
     CreatePartitions(CreatePartitions),
     DeletePartitions(DeletePartitions),
     GetGroup(GetConsumerGroup),
@@ -118,12 +126,12 @@ pub trait CommandPayload: BytesSerializable + Display {}
 impl BytesSerializable for Command {
     fn as_bytes(&self) -> Vec<u8> {
         match self {
-            Command::Kill(payload) => as_bytes(KILL_CODE, &payload.as_bytes()),
             Command::Ping(payload) => as_bytes(PING_CODE, &payload.as_bytes()),
             Command::GetStats(payload) => as_bytes(GET_STATS_CODE, &payload.as_bytes()),
             Command::GetMe(payload) => as_bytes(GET_ME_CODE, &payload.as_bytes()),
             Command::GetClient(payload) => as_bytes(GET_CLIENT_CODE, &payload.as_bytes()),
             Command::GetClients(payload) => as_bytes(GET_CLIENTS_CODE, &payload.as_bytes()),
+            Command::LoginUser(payload) => as_bytes(LOGIN_USER_CODE, &payload.as_bytes()),
             Command::SendMessages(payload) => as_bytes(SEND_MESSAGES_CODE, &payload.as_bytes()),
             Command::PollMessages(payload) => as_bytes(POLL_MESSAGES_CODE, &payload.as_bytes()),
             Command::StoreConsumerOffset(payload) => {
@@ -136,10 +144,12 @@ impl BytesSerializable for Command {
             Command::GetStreams(payload) => as_bytes(GET_STREAMS_CODE, &payload.as_bytes()),
             Command::CreateStream(payload) => as_bytes(CREATE_STREAM_CODE, &payload.as_bytes()),
             Command::DeleteStream(payload) => as_bytes(DELETE_STREAM_CODE, &payload.as_bytes()),
+            Command::UpdateStream(payload) => as_bytes(UPDATE_STREAM_CODE, &payload.as_bytes()),
             Command::GetTopic(payload) => as_bytes(GET_TOPIC_CODE, &payload.as_bytes()),
             Command::GetTopics(payload) => as_bytes(GET_TOPICS_CODE, &payload.as_bytes()),
             Command::CreateTopic(payload) => as_bytes(CREATE_TOPIC_CODE, &payload.as_bytes()),
             Command::DeleteTopic(payload) => as_bytes(DELETE_TOPIC_CODE, &payload.as_bytes()),
+            Command::UpdateTopic(payload) => as_bytes(UPDATE_TOPIC_CODE, &payload.as_bytes()),
             Command::CreatePartitions(payload) => {
                 as_bytes(CREATE_PARTITIONS_CODE, &payload.as_bytes())
             }
@@ -165,12 +175,12 @@ impl BytesSerializable for Command {
         let command = u32::from_le_bytes(bytes[..4].try_into()?);
         let payload = &bytes[4..];
         match command {
-            KILL_CODE => Ok(Command::Kill(Kill::from_bytes(payload)?)),
             PING_CODE => Ok(Command::Ping(Ping::from_bytes(payload)?)),
             GET_STATS_CODE => Ok(Command::GetStats(GetStats::from_bytes(payload)?)),
             GET_ME_CODE => Ok(Command::GetMe(GetMe::from_bytes(payload)?)),
             GET_CLIENT_CODE => Ok(Command::GetClient(GetClient::from_bytes(payload)?)),
             GET_CLIENTS_CODE => Ok(Command::GetClients(GetClients::from_bytes(payload)?)),
+            LOGIN_USER_CODE => Ok(Command::LoginUser(LoginUser::from_bytes(payload)?)),
             SEND_MESSAGES_CODE => Ok(Command::SendMessages(SendMessages::from_bytes(payload)?)),
             POLL_MESSAGES_CODE => Ok(Command::PollMessages(PollMessages::from_bytes(payload)?)),
             STORE_CONSUMER_OFFSET_CODE => Ok(Command::StoreConsumerOffset(
@@ -183,10 +193,12 @@ impl BytesSerializable for Command {
             GET_STREAMS_CODE => Ok(Command::GetStreams(GetStreams::from_bytes(payload)?)),
             CREATE_STREAM_CODE => Ok(Command::CreateStream(CreateStream::from_bytes(payload)?)),
             DELETE_STREAM_CODE => Ok(Command::DeleteStream(DeleteStream::from_bytes(payload)?)),
+            UPDATE_STREAM_CODE => Ok(Command::UpdateStream(UpdateStream::from_bytes(payload)?)),
             GET_TOPIC_CODE => Ok(Command::GetTopic(GetTopic::from_bytes(payload)?)),
             GET_TOPICS_CODE => Ok(Command::GetTopics(GetTopics::from_bytes(payload)?)),
             CREATE_TOPIC_CODE => Ok(Command::CreateTopic(CreateTopic::from_bytes(payload)?)),
             DELETE_TOPIC_CODE => Ok(Command::DeleteTopic(DeleteTopic::from_bytes(payload)?)),
+            UPDATE_TOPIC_CODE => Ok(Command::UpdateTopic(UpdateTopic::from_bytes(payload)?)),
             CREATE_PARTITIONS_CODE => Ok(Command::CreatePartitions(CreatePartitions::from_bytes(
                 payload,
             )?)),
@@ -228,12 +240,12 @@ impl FromStr for Command {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let (command, payload) = input.split_once('|').unwrap_or((input, ""));
         match command {
-            KILL => Ok(Command::Kill(Kill::from_str(payload)?)),
             PING => Ok(Command::Ping(Ping::from_str(payload)?)),
             GET_STATS => Ok(Command::GetStats(GetStats::from_str(payload)?)),
             GET_ME => Ok(Command::GetMe(GetMe::from_str(payload)?)),
             GET_CLIENT => Ok(Command::GetClient(GetClient::from_str(payload)?)),
             GET_CLIENTS => Ok(Command::GetClients(GetClients::from_str(payload)?)),
+            LOGIN_USER => Ok(Command::LoginUser(LoginUser::from_str(payload)?)),
             SEND_MESSAGES => Ok(Command::SendMessages(SendMessages::from_str(payload)?)),
             POLL_MESSAGES => Ok(Command::PollMessages(PollMessages::from_str(payload)?)),
             STORE_CONSUMER_OFFSET => Ok(Command::StoreConsumerOffset(
@@ -246,10 +258,12 @@ impl FromStr for Command {
             GET_STREAMS => Ok(Command::GetStreams(GetStreams::from_str(payload)?)),
             CREATE_STREAM => Ok(Command::CreateStream(CreateStream::from_str(payload)?)),
             DELETE_STREAM => Ok(Command::DeleteStream(DeleteStream::from_str(payload)?)),
+            UPDATE_STREAM => Ok(Command::UpdateStream(UpdateStream::from_str(payload)?)),
             GET_TOPIC => Ok(Command::GetTopic(GetTopic::from_str(payload)?)),
             GET_TOPICS => Ok(Command::GetTopics(GetTopics::from_str(payload)?)),
             CREATE_TOPIC => Ok(Command::CreateTopic(CreateTopic::from_str(payload)?)),
             DELETE_TOPIC => Ok(Command::DeleteTopic(DeleteTopic::from_str(payload)?)),
+            UPDATE_TOPIC => Ok(Command::UpdateTopic(UpdateTopic::from_str(payload)?)),
             CREATE_PARTITIONS => Ok(Command::CreatePartitions(CreatePartitions::from_str(
                 payload,
             )?)),
@@ -274,20 +288,22 @@ impl FromStr for Command {
 impl Display for Command {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Command::Kill(_) => write!(formatter, "{}", KILL),
             Command::Ping(_) => write!(formatter, "{}", PING),
             Command::GetStats(_) => write!(formatter, "{}", GET_STATS),
             Command::GetMe(_) => write!(formatter, "{}", GET_ME),
             Command::GetClient(payload) => write!(formatter, "{}|{}", GET_CLIENT, payload),
             Command::GetClients(_) => write!(formatter, "{}", GET_CLIENTS),
+            Command::LoginUser(payload) => write!(formatter, "{}|{}", LOGIN_USER, payload),
             Command::GetStream(payload) => write!(formatter, "{}|{}", GET_STREAM, payload),
             Command::GetStreams(_) => write!(formatter, "{}", GET_STREAMS),
             Command::CreateStream(payload) => write!(formatter, "{}|{}", CREATE_STREAM, payload),
             Command::DeleteStream(payload) => write!(formatter, "{}|{}", DELETE_STREAM, payload),
+            Command::UpdateStream(payload) => write!(formatter, "{}|{}", UPDATE_STREAM, payload),
             Command::GetTopic(payload) => write!(formatter, "{}|{}", GET_TOPIC, payload),
             Command::GetTopics(payload) => write!(formatter, "{}|{}", GET_TOPICS, payload),
             Command::CreateTopic(payload) => write!(formatter, "{}|{}", CREATE_TOPIC, payload),
             Command::DeleteTopic(payload) => write!(formatter, "{}|{}", DELETE_TOPIC, payload),
+            Command::UpdateTopic(payload) => write!(formatter, "{}|{}", UPDATE_TOPIC, payload),
             Command::CreatePartitions(payload) => {
                 write!(formatter, "{}|{}", CREATE_PARTITIONS, payload)
             }
@@ -325,11 +341,6 @@ mod tests {
     #[test]
     fn should_be_serialized_as_bytes_and_deserialized_from_bytes() {
         assert_serialized_as_bytes_and_deserialized_from_bytes(
-            &Command::Kill(Kill::default()),
-            KILL_CODE,
-            &Kill::default(),
-        );
-        assert_serialized_as_bytes_and_deserialized_from_bytes(
             &Command::Ping(Ping::default()),
             PING_CODE,
             &Ping::default(),
@@ -353,6 +364,11 @@ mod tests {
             &Command::GetClients(GetClients::default()),
             GET_CLIENTS_CODE,
             &GetClients::default(),
+        );
+        assert_serialized_as_bytes_and_deserialized_from_bytes(
+            &Command::LoginUser(LoginUser::default()),
+            LOGIN_USER_CODE,
+            &LoginUser::default(),
         );
         assert_serialized_as_bytes_and_deserialized_from_bytes(
             &Command::SendMessages(SendMessages::default()),
@@ -395,6 +411,11 @@ mod tests {
             &DeleteStream::default(),
         );
         assert_serialized_as_bytes_and_deserialized_from_bytes(
+            &Command::UpdateStream(UpdateStream::default()),
+            UPDATE_STREAM_CODE,
+            &UpdateStream::default(),
+        );
+        assert_serialized_as_bytes_and_deserialized_from_bytes(
             &Command::GetTopic(GetTopic::default()),
             GET_TOPIC_CODE,
             &GetTopic::default(),
@@ -413,6 +434,11 @@ mod tests {
             &Command::DeleteTopic(DeleteTopic::default()),
             DELETE_TOPIC_CODE,
             &DeleteTopic::default(),
+        );
+        assert_serialized_as_bytes_and_deserialized_from_bytes(
+            &Command::UpdateTopic(UpdateTopic::default()),
+            UPDATE_TOPIC_CODE,
+            &UpdateTopic::default(),
         );
         assert_serialized_as_bytes_and_deserialized_from_bytes(
             &Command::CreatePartitions(CreatePartitions::default()),
@@ -458,7 +484,6 @@ mod tests {
 
     #[test]
     fn should_be_read_from_string() {
-        assert_read_from_string(&Command::Kill(Kill::default()), KILL, &Kill::default());
         assert_read_from_string(&Command::Ping(Ping::default()), PING, &Ping::default());
         assert_read_from_string(
             &Command::GetStats(GetStats::default()),
@@ -475,6 +500,11 @@ mod tests {
             &Command::GetClients(GetClients::default()),
             GET_CLIENTS,
             &GetClients::default(),
+        );
+        assert_read_from_string(
+            &Command::LoginUser(LoginUser::default()),
+            LOGIN_USER,
+            &LoginUser::default(),
         );
         assert_read_from_string(
             &Command::SendMessages(SendMessages::default()),
@@ -517,6 +547,11 @@ mod tests {
             &DeleteStream::default(),
         );
         assert_read_from_string(
+            &Command::UpdateStream(UpdateStream::default()),
+            UPDATE_STREAM,
+            &UpdateStream::default(),
+        );
+        assert_read_from_string(
             &Command::GetTopic(GetTopic::default()),
             GET_TOPIC,
             &GetTopic::default(),
@@ -535,6 +570,11 @@ mod tests {
             &Command::DeleteTopic(DeleteTopic::default()),
             DELETE_TOPIC,
             &DeleteTopic::default(),
+        );
+        assert_read_from_string(
+            &Command::UpdateTopic(UpdateTopic::default()),
+            UPDATE_TOPIC,
+            &UpdateTopic::default(),
         );
         assert_read_from_string(
             &Command::CreatePartitions(CreatePartitions::default()),

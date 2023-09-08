@@ -1,6 +1,6 @@
 use crate::client::{
     Client, ConsumerGroupClient, ConsumerOffsetClient, MessageClient, PartitionClient,
-    StreamClient, SystemClient, TopicClient,
+    StreamClient, SystemClient, TopicClient, UserClient,
 };
 use crate::consumer::Consumer;
 use crate::consumer_groups::create_consumer_group::CreateConsumerGroup;
@@ -17,8 +17,8 @@ use crate::messages::poll_messages::{PollMessages, PollingKind};
 use crate::messages::send_messages::{Partitioning, PartitioningKind, SendMessages};
 use crate::models::client_info::{ClientInfo, ClientInfoDetails};
 use crate::models::consumer_group::{ConsumerGroup, ConsumerGroupDetails};
-use crate::models::message::Message;
-use crate::models::offset::Offset;
+use crate::models::consumer_offset_info::ConsumerOffsetInfo;
+use crate::models::messages::{Message, PolledMessages};
 use crate::models::stats::Stats;
 use crate::models::stream::{Stream, StreamDetails};
 use crate::models::topic::{Topic, TopicDetails};
@@ -29,16 +29,18 @@ use crate::streams::create_stream::CreateStream;
 use crate::streams::delete_stream::DeleteStream;
 use crate::streams::get_stream::GetStream;
 use crate::streams::get_streams::GetStreams;
+use crate::streams::update_stream::UpdateStream;
 use crate::system::get_client::GetClient;
 use crate::system::get_clients::GetClients;
 use crate::system::get_me::GetMe;
 use crate::system::get_stats::GetStats;
-use crate::system::kill::Kill;
 use crate::system::ping::Ping;
 use crate::topics::create_topic::CreateTopic;
 use crate::topics::delete_topic::DeleteTopic;
 use crate::topics::get_topic::GetTopic;
 use crate::topics::get_topics::GetTopics;
+use crate::topics::update_topic::UpdateTopic;
+use crate::users::login_user::LoginUser;
 use crate::utils::crypto::Encryptor;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -183,13 +185,13 @@ impl IggyClient {
             loop {
                 sleep(interval).await;
                 let client = client.read().await;
-                let messages = client.poll_messages(&poll_messages).await;
-                if let Err(error) = messages {
+                let polled_messages = client.poll_messages(&poll_messages).await;
+                if let Err(error) = polled_messages {
                     error!("There was an error while polling messages: {:?}", error);
                     continue;
                 }
 
-                let messages = messages.unwrap();
+                let messages = polled_messages.unwrap().messages;
                 if messages.is_empty() {
                     continue;
                 }
@@ -263,7 +265,7 @@ impl IggyClient {
                 let mut initialized = false;
                 let mut stream_id = Identifier::numeric(1).unwrap();
                 let mut topic_id = Identifier::numeric(1).unwrap();
-                let mut key = Partitioning::partition_id(0);
+                let mut key = Partitioning::partition_id(1);
                 let mut batch_messages = true;
 
                 for send_messages in send_messages_batch.commands.iter() {
@@ -310,6 +312,10 @@ impl IggyClient {
                     }
                 }
 
+                if !messages.is_empty() {
+                    batches.push_back(messages);
+                }
+
                 while let Some(messages) = batches.pop_front() {
                     let mut send_messages = SendMessages {
                         stream_id: Identifier::from_identifier(&stream_id),
@@ -328,12 +334,23 @@ impl IggyClient {
                             "There was an error when sending the messages batch: {:?}",
                             error
                         );
+
+                        if !send_messages.messages.is_empty() {
+                            batches.push_back(send_messages.messages);
+                        }
                     }
                 }
 
                 send_messages_batch.commands.clear();
             }
         });
+    }
+}
+
+#[async_trait]
+impl UserClient for IggyClient {
+    async fn login_user(&self, command: &LoginUser) -> Result<(), Error> {
+        self.client.read().await.login_user(command).await
     }
 }
 
@@ -369,10 +386,6 @@ impl SystemClient for IggyClient {
     async fn ping(&self, command: &Ping) -> Result<(), Error> {
         self.client.read().await.ping(command).await
     }
-
-    async fn kill(&self, command: &Kill) -> Result<(), Error> {
-        self.client.read().await.kill(command).await
-    }
 }
 
 #[async_trait]
@@ -387,6 +400,10 @@ impl StreamClient for IggyClient {
 
     async fn create_stream(&self, command: &CreateStream) -> Result<(), Error> {
         self.client.read().await.create_stream(command).await
+    }
+
+    async fn update_stream(&self, command: &UpdateStream) -> Result<(), Error> {
+        self.client.read().await.update_stream(command).await
     }
 
     async fn delete_stream(&self, command: &DeleteStream) -> Result<(), Error> {
@@ -408,6 +425,10 @@ impl TopicClient for IggyClient {
         self.client.read().await.create_topic(command).await
     }
 
+    async fn update_topic(&self, command: &UpdateTopic) -> Result<(), Error> {
+        self.client.read().await.update_topic(command).await
+    }
+
     async fn delete_topic(&self, command: &DeleteTopic) -> Result<(), Error> {
         self.client.read().await.delete_topic(command).await
     }
@@ -426,27 +447,15 @@ impl PartitionClient for IggyClient {
 
 #[async_trait]
 impl MessageClient for IggyClient {
-    async fn poll_messages(&self, command: &PollMessages) -> Result<Vec<Message>, Error> {
-        let messages = self.client.read().await.poll_messages(command).await?;
+    async fn poll_messages(&self, command: &PollMessages) -> Result<PolledMessages, Error> {
+        let mut polled_messages = self.client.read().await.poll_messages(command).await?;
         if let Some(ref encryptor) = self.encryptor {
-            let mut decrypted_messages = Vec::with_capacity(messages.len());
-            for message in messages {
+            for message in polled_messages.messages.iter_mut() {
                 let payload = encryptor.decrypt(&message.payload)?;
-                decrypted_messages.push(Message {
-                    id: message.id,
-                    state: message.state,
-                    checksum: message.checksum,
-                    offset: message.offset,
-                    timestamp: message.timestamp,
-                    length: payload.len() as u32,
-                    headers: message.headers,
-                    payload: Bytes::from(payload),
-                });
+                message.payload = Bytes::from(payload);
             }
-            Ok(decrypted_messages)
-        } else {
-            Ok(messages)
         }
+        Ok(polled_messages)
     }
 
     async fn send_messages(&self, command: &mut SendMessages) -> Result<(), Error> {
@@ -508,7 +517,10 @@ impl ConsumerOffsetClient for IggyClient {
             .await
     }
 
-    async fn get_consumer_offset(&self, command: &GetConsumerOffset) -> Result<Offset, Error> {
+    async fn get_consumer_offset(
+        &self,
+        command: &GetConsumerOffset,
+    ) -> Result<ConsumerOffsetInfo, Error> {
         self.client.read().await.get_consumer_offset(command).await
     }
 }

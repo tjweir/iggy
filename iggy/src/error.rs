@@ -12,6 +12,22 @@ pub enum Error {
     EmptyResponse,
     #[error("Invalid configuration")]
     InvalidConfiguration,
+    #[error("Resource with key: {0} was not found.")]
+    ResourceNotFound(String),
+    #[error("Cannot load resource with key: {0}")]
+    CannotLoadResource(String),
+    #[error("Cannot save resource with key: {0}")]
+    CannotSaveResource(String),
+    #[error("Cannot delete resource with key: {0}")]
+    CannotDeleteResource(String),
+    #[error("Cannot serialize resource with key: {0}")]
+    CannotSerializeResource(String),
+    #[error("Cannot deserialize resource with key: {0}")]
+    CannotDeserializeResource(String),
+    #[error("Unauthenticated")]
+    Unauthenticated,
+    #[error("Unauthorized")]
+    Unauthorized,
     #[error("Not connected")]
     NotConnected,
     #[error("Request error")]
@@ -56,6 +72,12 @@ pub enum Error {
     InvalidCommand,
     #[error("Invalid format")]
     InvalidFormat,
+    #[error("Invalid credentials")]
+    InvalidCredentials,
+    #[error("Invalid username")]
+    InvalidUsername,
+    #[error("Invalid password")]
+    InvalidPassword,
     #[error("Cannot create base directory")]
     CannotCreateBaseDirectory,
     #[error("Cannot create streams directory")]
@@ -158,8 +180,10 @@ pub enum Error {
         "Failed to read partitions directories for topic with ID: {0} and stream with ID: {1}"
     )]
     CannotReadPartitions(u32, u32),
-    #[error("Partition with ID: {0} was not found.")]
-    PartitionNotFound(u32),
+    #[error(
+        "Partition with ID: {0} for topic with ID: {1} for stream with ID: {2} was not found."
+    )]
+    PartitionNotFound(u32, u32, u32),
     #[error("Topic with ID: {0} for stream with ID: {1} has no partitions.")]
     NoPartitions(u32, u32),
     #[error("Invalid key value length")]
@@ -247,6 +271,17 @@ impl Error {
             Error::InvalidFormat => 4,
             Error::FeatureUnavailable => 5,
             Error::CannotCreateBaseDirectory => 10,
+            Error::ResourceNotFound(_) => 20,
+            Error::CannotLoadResource(_) => 21,
+            Error::CannotSaveResource(_) => 22,
+            Error::CannotDeleteResource(_) => 23,
+            Error::CannotSerializeResource(_) => 24,
+            Error::CannotDeserializeResource(_) => 25,
+            Error::Unauthenticated => 40,
+            Error::Unauthorized => 41,
+            Error::InvalidCredentials => 42,
+            Error::InvalidUsername => 43,
+            Error::InvalidPassword => 44,
             Error::NotConnected => 51,
             Error::RequestError(_) => 52,
             Error::InvalidEncryptionKey => 60,
@@ -310,7 +345,7 @@ impl Error {
             Error::CannotReadPartitions(_, _) => 3004,
             Error::CannotDeletePartition(_, _, _) => 3005,
             Error::CannotDeletePartitionDirectory(_, _, _) => 3006,
-            Error::PartitionNotFound(_) => 3007,
+            Error::PartitionNotFound(_, _, _) => 3007,
             Error::NoPartitions(_, _) => 3008,
             Error::SegmentNotFound => 4000,
             Error::SegmentClosed(_, _) => 4001,
@@ -362,6 +397,17 @@ impl Error {
             4 => "invalid_format",
             5 => "feature_unavailable",
             10 => "cannot_create_base_directory",
+            20 => "resource_not_found",
+            21 => "cannot_load_resource",
+            22 => "cannot_save_resource",
+            23 => "cannot_delete_resource",
+            24 => "cannot_serialize_resource",
+            25 => "cannot_deserialize_resource",
+            40 => "unauthenticated",
+            41 => "unauthorized",
+            42 => "invalid_credentials",
+            43 => "invalid_username",
+            44 => "invalid_password",
             51 => "not_connected",
             52 => "request_error",
             60 => "invalid_encryption_key",
@@ -476,6 +522,17 @@ impl Error {
             Error::IoError(_) => "io_error",
             Error::InvalidCommand => "invalid_command",
             Error::InvalidFormat => "invalid_format",
+            Error::ResourceNotFound(_) => "resource_not_found",
+            Error::CannotLoadResource(_) => "cannot_load_resource",
+            Error::CannotSaveResource(_) => "cannot_save_resource",
+            Error::CannotDeleteResource(_) => "cannot_delete_resource",
+            Error::CannotSerializeResource(_) => "cannot_serialize_resource",
+            Error::CannotDeserializeResource(_) => "cannot_deserialize_resource",
+            Error::Unauthenticated => "unauthenticated",
+            Error::Unauthorized => "unauthorized",
+            Error::InvalidCredentials => "invalid_credentials",
+            Error::InvalidUsername => "invalid_username",
+            Error::InvalidPassword => "invalid_password",
             Error::InvalidEncryptionKey => "invalid_encryption_key",
             Error::CannotEncryptData => "cannot_encrypt_data",
             Error::CannotDecryptData => "cannot_decrypt_data",
@@ -518,7 +575,7 @@ impl Error {
             Error::CannotCreateSegmentTimeIndexFile(_) => "cannot_create_segment_time_index_file",
             Error::CannotOpenPartitionLogFile => "cannot_open_partition_log_file",
             Error::CannotReadPartitions(_, _) => "cannot_read_partitions",
-            Error::PartitionNotFound(_) => "partition_not_found",
+            Error::PartitionNotFound(_, _, _) => "partition_not_found",
             Error::NoPartitions(_, _) => "no_partitions",
             Error::InvalidMessagesCount => "invalid_messages_count",
             Error::InvalidStreamId => "invalid_stream_id",

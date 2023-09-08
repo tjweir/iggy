@@ -3,34 +3,37 @@ mod common;
 use crate::common::TestSetup;
 use bytes::Bytes;
 use iggy::models::header::{HeaderKey, HeaderValue};
-use iggy::models::message::{Message, MessageState};
+use iggy::models::messages::{Message, MessageState};
 use iggy::utils::{checksum, timestamp};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
-use streaming::config::PartitionConfig;
+use streaming::config::{PartitionConfig, SystemConfig};
 use streaming::partitions::partition::Partition;
-use streaming::storage::SystemStorage;
 
 #[tokio::test]
 async fn should_persist_messages_and_then_load_them_from_disk() {
     let setup = TestSetup::init().await;
-    let storage = Arc::new(SystemStorage::default());
     let stream_id = 1;
     let topic_id = 1;
     let partition_id = 1;
     let messages_count = 1000;
-    let config = Arc::new(PartitionConfig {
-        messages_required_to_save: messages_count,
+    let config = Arc::new(SystemConfig {
+        path: setup.config.path.to_string(),
+        partition: PartitionConfig {
+            messages_required_to_save: messages_count,
+            ..Default::default()
+        },
         ..Default::default()
     });
     let mut partition = Partition::create(
         stream_id,
         topic_id,
         partition_id,
-        &setup.path,
         true,
         config.clone(),
-        storage.clone(),
+        setup.storage.clone(),
+        None,
     );
 
     let mut messages = Vec::with_capacity(messages_count as usize);
@@ -77,6 +80,7 @@ async fn should_persist_messages_and_then_load_them_from_disk() {
         messages.push(message);
     }
 
+    setup.create_partitions_directory(stream_id, topic_id).await;
     partition.persist().await.unwrap();
     partition.append_messages(messages).await.unwrap();
     assert_eq!(partition.unsaved_messages_count, 0);
@@ -84,10 +88,9 @@ async fn should_persist_messages_and_then_load_them_from_disk() {
     let mut loaded_partition = Partition::empty(
         stream_id,
         topic_id,
-        partition.id,
-        &setup.path,
+        partition.partition_id,
         config.clone(),
-        storage.clone(),
+        setup.storage.clone(),
     );
     loaded_partition.load().await.unwrap();
     let loaded_messages = loaded_partition

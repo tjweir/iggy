@@ -12,6 +12,13 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PolledMessages {
+    pub partition_id: u32,
+    pub current_offset: u64,
+    pub messages: Vec<Message>,
+}
+
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -85,7 +92,7 @@ impl Message {
     pub fn from_message(message: &send_messages::Message) -> Self {
         let timestamp = timestamp::get();
         let checksum = checksum::calculate(&message.payload);
-        let headers = message.headers.as_ref().map(|headers| headers.clone());
+        let headers = message.headers.as_ref().cloned();
 
         Self::empty(
             timestamp,

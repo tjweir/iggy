@@ -1,6 +1,6 @@
 # Iggy
 
-[Website](https://iggy.rs) | [Getting started](https://docs.iggy.rs/introduction/getting-started/) | [Documentation](https://docs.iggy.rs) | [Crates](https://crates.io/crates/iggy)
+[Website](https://iggy.rs) | [Getting started](https://docs.iggy.rs/introduction/getting-started/) | [Documentation](https://docs.iggy.rs) | [Discord](https://iggy.rs/discord) | [Crates](https://crates.io/crates/iggy)
 
 ---
 
@@ -12,7 +12,7 @@
 
 The goal of the project is to make a distributed streaming platform (running as a cluster), which will be able to scale horizontally and handle **millions of messages per second** (actually, **it's already very fast**, see the benchmarks below).
 
-It is a pet project of mine to learn more about distributed systems and Rust. The name is an abbreviation for the Italian Greyhound - small yet extremely fast dogs, the best in their class. Just like mine lovely [Fabio & Cookie](https://www.instagram.com/fabio.and.cookie/) ❤️
+The name is an abbreviation for the Italian Greyhound - small yet extremely fast dogs, the best in their class. Just like mine lovely [Fabio & Cookie](https://www.instagram.com/fabio.and.cookie/) ❤️
 
 ---
 
@@ -35,11 +35,13 @@ It is a pet project of mine to learn more about distributed systems and Rust. Th
   - Next N messages for the specific consumer
 - Possibility of **auto committing the offset** (e.g. to achieve *at-most-once* delivery)
 - **Consumer groups** providing the message ordering and horizontal scaling across the connected clients
+- **Message expiry** with auto deletion based on the configurable **retention policy**
 - Additional features such as **server side message deduplication**
 - **TLS** support for all transport protocols (TCP, QUIC, HTTPS)
 - Optional server-side as well as client-side **data encryption** using AES-256-GCM
 - Optional metadata support in the form of **message headers**
-- Built-in benchmarking app to test the performance
+- Built-in **CLI** to manage the streaming server
+- Built-in **benchmarking app** to test the performance
 - **Single binary deployment** (no external dependencies)
 - Running as a single node (no cluster support yet)
 
@@ -63,7 +65,7 @@ There's an ongoing effort to build the administrative web UI for the server, whi
 
 You can find the `Dockerfile` and `docker-compose` in the root of the repository. To build and start the server, run: `docker compose up`.
 
-Additionally, you can run the `client` which is available in the running container, by executing: `docker exec -it iggy-server /client`.
+Additionally, you can run the `CLI` which is available in the running container, by executing: `docker exec -it iggy-server /cli`.
 
 Keep in mind that running the container on the OS other than Linux, where the Docker is running in the VM, might result in the significant performance degradation.
 
@@ -93,13 +95,13 @@ Run the tests:
 
 Start the server:
 
-`cargo r --bin server -r`
+`cargo r --bin iggy-server -r`
 
-Start the client (transports: `quic`, `tcp`, `http`):
+Start the CLI (transports: `quic`, `tcp`, `http`):
 
-`cargo r --bin client -r --transport tcp`
+`cargo r --bin iggy-cli -r -- --transport tcp`
 
-Create a stream named `dev` with ID 1:
+Create a stream with ID 1 named `dev`:
 
 `stream.create|1|dev`
 
@@ -111,9 +113,9 @@ Get stream details (ID 1):
 
 `stream.get|1`
 
-Create a topic named `dummy` with ID 1 and 2 partitions (IDs 1 and 2) for stream `dev` (ID 1):
+Create a topic for stream `dev` (ID 1), with ID 1, 2 partitions (IDs 1 and 2), disabled message expiry (0 seconds), named `sample`:
 
-`topic.create|1|1|2|dummy`
+`topic.create|1|1|2|0|sample`
 
 List available topics for stream `dev` (ID 1):
 
@@ -123,7 +125,7 @@ Get topic details (ID 1) for stream `dev` (ID 1):
 
 `topic.get|1|1`
 
-Send a message 'hello world' (ID 1) to the stream `dev` (ID 1) to topic `dummy` (ID 1) and partition 1:
+Send a message 'hello world' (ID 1) to the stream `dev` (ID 1) to topic `sample` (ID 1) and partition 1:
 
 `message.send|1|1|p|1|1|hello world`
 
@@ -131,7 +133,7 @@ Send another message 'lorem ipsum' (ID 2) to the same stream, topic and partitio
 
 `message.send|1|1|p|1|2|lorem ipsum`
 
-Poll messages by a regular consumer `c` (`g` for consumer group) with ID 0 from the stream `dev` (ID 1) for topic `dummy` (ID 1) and partition with ID 1, starting with offset (`o`) 0, messages count 2, without auto commit (`n`) (storing consumer offset on server) and using string format `s` to render messages payload:
+Poll messages by a regular consumer `c` (`g` for consumer group) with ID 0 from the stream `dev` (ID 1) for topic `sample` (ID 1) and partition with ID 1, starting with offset (`o`) 0, messages count 2, without auto commit (`n`) (storing consumer offset on server) and using string format `s` to render messages payload:
 
 `message.poll|c|0|1|1|1|o|0|2|n|s`
 
@@ -139,7 +141,7 @@ Finally, restart the server to see it is able to load the persisted data.
 
 The HTTP API endpoints can be found in [server.http](https://github.com/spetz/iggy/blob/master/server/server.http) file, which can be used with [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension for VS Code.
 
-To see the detailed logs from the client/server, run it with `RUST_LOG=trace` environment variable.
+To see the detailed logs from the CLI/server, run it with `RUST_LOG=trace` environment variable.
 
 **See the images below**
 
@@ -151,9 +153,9 @@ To see the detailed logs from the client/server, run it with `RUST_LOG=trace` en
 
 ![server start](assets/server_start.png)
 
-*Client start*
+*CLI start*
 
-![client start](assets/client_start.png)
+![cli_start](assets/cli_start.png)
 
 *Server restart*
 
@@ -165,7 +167,7 @@ To see the detailed logs from the client/server, run it with `RUST_LOG=trace` en
 
 You can find the sample consumer & producer applications under `samples` directory. The purpose of these apps is to showcase the usage of the client SDK. To find out more about building the applications, please refer to the [getting started](https://docs.iggy.rs/introduction/getting-started) guide.
 
-To run the sample, first start the server with `cargo r --bin server` and then run the producer and consumer apps with `cargo r --bin message-envelope-producer-sample` and `cargo r --bin message-envelope-consumer-sample` respectively.
+To run the sample, first start the server with `cargo r --bin iggy-server` and then run the producer and consumer apps with `cargo r --bin message-envelope-producer-sample` and `cargo r --bin message-envelope-consumer-sample` respectively.
 
 You might start multiple producers and consumers at the same time to see how the messages are being handled across multiple clients. Check the [Args](https://github.com/spetz/iggy/blob/master/samples/src/shared/args.rs) struct to see the available options, such as the transport protocol, stream, topic, partition, consumer ID, message size etc.
 
@@ -179,9 +181,9 @@ By default, the consumer will poll the messages using the `next` available offse
 
 To benchmark the project, first start the server and then run the benchmarking app:
 
-`cargo r --bin bench -r -- --tcp --test-send-messages --streams 10 --producers 10 --parallel-producer-streams --messages-per-batch 1000 --message-batches 1000 --message-size 1000`
+`cargo r --bin iggy-bench -r -- --tcp --test-send-messages --streams 10 --producers 10 --parallel-producer-streams --messages-per-batch 1000 --message-batches 1000 --message-size 1000`
 
-`cargo r --bin bench -r -- --tcp --test-poll-messages --streams 10 --consumers 10 --parallel-consumer-streams --messages-per-batch 1000 --message-batches 1000`
+`cargo r --bin iggy-bench -r -- --tcp --test-poll-messages --streams 10 --consumers 10 --parallel-consumer-streams --messages-per-batch 1000 --message-batches 1000`
 
 Depending on the hardware, settings in `configs/server.toml` (the default configuration) or `server.json` file, transport protocol (`quic`, `tcp` or `http`) and payload size (`messages-per-batch * message-size`) you might expect **over 4000 MB/s (e.g. 4M of 1 KB msg/sec) throughput for writes and 6000 MB/s for reads**. The current results have been achieved on Apple M1 Max with 64 GB RAM.
 
@@ -254,7 +256,7 @@ Depending on the hardware, settings in `configs/server.toml` (the default config
 - [x] Implement the HTTP SDK for the client
 - [x] Implement the TCP SDK for the client
 - [x] Make use of the SDK in client project
-- [ ] Implement another SDK in C# for dotnet clients
+- [x] Implement another SDK in C# for dotnet clients
 
 #### Streaming
 
@@ -283,7 +285,7 @@ Depending on the hardware, settings in `configs/server.toml` (the default config
 - [x] Implement optional message headers
 - [x] Implement message deduplication
 - [x] Implement consumer groups for message ordering & horizontal scaling
-- [ ] Delete old messages bases on retention policy
+- [x] Delete old messages bases on retention policy
 
 #### Distribution
 
@@ -305,4 +307,4 @@ Depending on the hardware, settings in `configs/server.toml` (the default config
 
 #### UI
 
-- [ ] Build a simple UI for the server using chosen framework
+- [x] Build a simple UI for the server using chosen framework

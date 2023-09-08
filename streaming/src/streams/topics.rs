@@ -11,6 +11,7 @@ impl Stream {
         id: u32,
         name: &str,
         partitions_count: u32,
+        message_expiry: Option<u32>,
     ) -> Result<(), Error> {
         if self.topics.contains_key(&id) {
             return Err(Error::TopicIdAlreadyExists(id, self.id));
@@ -26,9 +27,9 @@ impl Stream {
             id,
             &name,
             partitions_count,
-            &self.topics_path,
-            self.config.topic.clone(),
+            self.config.clone(),
             self.storage.clone(),
+            message_expiry,
         )?;
         topic.persist().await?;
         info!(
@@ -37,6 +38,52 @@ impl Stream {
         );
         self.topics_ids.insert(name, id);
         self.topics.insert(id, topic);
+
+        Ok(())
+    }
+
+    pub async fn update_topic(
+        &mut self,
+        id: &Identifier,
+        name: &str,
+        message_expiry: Option<u32>,
+    ) -> Result<(), Error> {
+        let topic_id;
+        {
+            let topic = self.get_topic(id)?;
+            topic_id = topic.topic_id;
+        }
+
+        let updated_name = text::to_lowercase_non_whitespace(name);
+
+        {
+            if let Some(topic_id_by_name) = self.topics_ids.get(&updated_name) {
+                if *topic_id_by_name != topic_id {
+                    return Err(Error::TopicNameAlreadyExists(
+                        updated_name.to_string(),
+                        self.id,
+                    ));
+                }
+            }
+        }
+
+        {
+            self.topics_ids.remove(&updated_name.clone());
+            self.topics_ids.insert(updated_name.clone(), topic_id);
+            let topic = self.get_topic_mut(id)?;
+            topic.name = updated_name;
+            topic.message_expiry = message_expiry;
+            for partition in topic.partitions.values_mut() {
+                let mut partition = partition.write().await;
+                partition.message_expiry = message_expiry;
+                for segment in partition.segments.iter_mut() {
+                    segment.message_expiry = message_expiry;
+                }
+            }
+
+            topic.persist().await?;
+            info!("Updated topic: {} with ID: {}", topic.name, id);
+        }
 
         Ok(())
     }
@@ -99,44 +146,24 @@ impl Stream {
         self.topics.values_mut().collect()
     }
 
-    pub async fn delete_topic(&mut self, id: &Identifier) -> Result<Topic, Error> {
-        let topic = match id.kind {
-            IdKind::Numeric => {
-                let topic_id = id.get_u32_value().unwrap();
-                let topic = self.topics.remove(&topic_id);
-                if topic.is_none() {
-                    return Err(Error::TopicIdNotFound(topic_id, self.id));
-                }
-
-                let topic = topic.unwrap();
-                self.topics_ids.remove(&topic.name);
-                topic
-            }
-            IdKind::String => {
-                let topic_name = id.get_string_value().unwrap();
-                let topic_id = self.topics_ids.remove(&topic_name);
-                if topic_id.is_none() {
-                    return Err(Error::TopicNameNotFound(topic_name, self.id));
-                }
-
-                let topic_id = topic_id.unwrap();
-                let topic = self.topics.remove(&topic_id);
-                topic.unwrap()
-            }
-        };
-
+    pub async fn delete_topic(&mut self, id: &Identifier) -> Result<u32, Error> {
+        let topic = self.get_topic(id)?;
+        let topic_id = topic.topic_id;
+        let topic_name = topic.name.clone();
         if topic.delete().await.is_err() {
-            return Err(Error::CannotDeleteTopic(topic.id, self.id));
+            return Err(Error::CannotDeleteTopic(topic.topic_id, self.id));
         }
 
-        Ok(topic)
+        self.topics.remove(&topic_id);
+        self.topics_ids.remove(&topic_name);
+        Ok(topic_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::StreamConfig;
+    use crate::config::SystemConfig;
     use crate::storage::tests::get_test_system_storage;
     use std::sync::Arc;
 
@@ -146,22 +173,25 @@ mod tests {
         let stream_name = "test_stream";
         let topic_id = 2;
         let topic_name = "test_topic";
-        let path = "/stream";
-        let config = Arc::new(StreamConfig::default());
+        let message_expiry = Some(10);
+        let config = Arc::new(SystemConfig::default());
         let storage = Arc::new(get_test_system_storage());
-        let mut stream = Stream::create(stream_id, stream_name, path, config, storage);
-        stream.create_topic(topic_id, topic_name, 1).await.unwrap();
+        let mut stream = Stream::create(stream_id, stream_name, config, storage);
+        stream
+            .create_topic(topic_id, topic_name, 1, message_expiry)
+            .await
+            .unwrap();
 
         let topic = stream.get_topic(&Identifier::numeric(topic_id).unwrap());
         assert!(topic.is_ok());
         let topic = topic.unwrap();
-        assert_eq!(topic.id, topic_id);
+        assert_eq!(topic.topic_id, topic_id);
         assert_eq!(topic.name, topic_name);
 
         let topic = stream.get_topic(&Identifier::named(topic_name).unwrap());
         assert!(topic.is_ok());
         let topic = topic.unwrap();
-        assert_eq!(topic.id, topic_id);
+        assert_eq!(topic.topic_id, topic_id);
         assert_eq!(topic.name, topic_name);
     }
 }
