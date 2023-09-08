@@ -16,16 +16,28 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // command line arguments parsing
     let args = Args::parse();
+    
+    // wtf
     tracing_subscriber::fmt::init();
+    
     info!(
         "Message envelope producer has started, selected transport: {}",
         args.transport
     );
+    
+    //
     let client_provider_config = Arc::new(ClientProviderConfig::from_args(args.to_sdk_args())?);
+    
     let client = client_provider::get_client(client_provider_config).await?;
+    
     let client = IggyClient::new(client, IggyClientConfig::default(), None, None);
+
+    // ???
     system::init_by_producer(&args, &client).await?;
+
+    // produce sample messages
     produce_messages(&args, &client).await
 }
 
@@ -36,6 +48,7 @@ async fn produce_messages(args: &Args, client: &IggyClient) -> Result<(), Box<dy
     );
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(args.interval));
     let mut message_generator = MessagesGenerator::new();
+    
     loop {
         let mut messages = Vec::new();
         let mut serializable_messages = Vec::new();

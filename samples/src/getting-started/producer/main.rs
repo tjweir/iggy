@@ -10,9 +10,9 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-const STREAM_ID: u32 = 1;
-const TOPIC_ID: u32 = 1;
-const PARTITION_ID: u32 = 1;
+const STREAM_ID: u32 = 2;
+const TOPIC_ID: u32 = 2;
+const PARTITION_ID: u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
